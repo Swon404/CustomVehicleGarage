@@ -15,6 +15,14 @@ The in-game bars use `machine_para.bin`, a separate table of visual ratings; the
 
 Vehicle names are patched in language-specific UI message archives. The name field allows up to 10 UTF-16 code units so names fit the in-game label space; the exporter still checks each selected slot and reports its available limit rather than resizing game archives.
 
+## Updates and releases
+
+Use **Update** in the app to check GitHub for a newer release. If you agree, the Windows executable is downloaded, checked against GitHub's SHA-256 asset digest, replaced, and restarted. Save any edits first. Creations and game data stay in the app's data folder. Automatic replacement is available only in the packaged Windows app; source users should update their checkout instead.
+
+GitHub Actions tests and builds pushes to `main`. Successful builds of the current `main` commit publish a Windows release with version `0.<workflow run>.<attempt>`; a later run receives a higher version. Pull requests are tested and built but not released. Pushing several commits together produces one build of the final commit, and a build superseded by a newer `main` commit is not published. Download the first update-capable executable from GitHub Releases; older builds cannot update themselves.
+
+This checkout currently sits inside a parent repository. Its workflow runs on GitHub only after the committed `CustomVehicleGarage` subtree is pushed to the project's own `main` branch.
+
 ## Build the exe
 
 ```powershell

@@ -8,12 +8,13 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from vehiclegarage import bmg, disc, dolphin, export
+from vehiclegarage import bmg, disc, dolphin, export, updater
 from vehiclegarage.creations import Creation, Library, slot_conflicts
 from vehiclegarage.kartparam import KartParam
 from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir
 from vehiclegarage.stats import ADVANCED_FIELDS, BARS
 from vehiclegarage.vehicles import VEHICLES, WEIGHT_CLASSES
+from vehiclegarage.version import VERSION
 
 COLORS = {
     "background": "#0b0c10",
@@ -231,6 +232,13 @@ class GarageApp(tk.Tk):
             command=lambda: self._navigate("setup"),
         )
         self.nav_buttons["setup"].pack(side="right")
+        self.update_button = ttk.Button(
+            nav,
+            text=f"UPDATE  |  v{VERSION}",
+            style="Nav.TButton",
+            command=self._check_update,
+        )
+        self.update_button.pack(side="right", padx=(0, 7))
 
         self.page_host = ttk.Frame(self, style="App.TFrame", padding=(14, 4, 14, 14))
         self.page_host.pack(fill="both", expand=True)
@@ -305,6 +313,34 @@ class GarageApp(tk.Tk):
                 self.events.put(lambda err=err: done(None, err))
 
         threading.Thread(target=runner, daemon=True).start()
+
+    def _check_update(self) -> None:
+        self.update_button.state(["disabled"])
+
+        def checked(release, error):
+            if error:
+                self.update_button.state(["!disabled"])
+                messagebox.showerror("Update check failed", str(error))
+            elif release is None:
+                self.update_button.state(["!disabled"])
+                messagebox.showinfo("Up to date", f"Version {VERSION} is the latest available.")
+            elif not messagebox.askyesno(
+                "Update available",
+                f"Version {release.version} is available (you have {VERSION}).\n\n"
+                "Install it and restart now? Unsaved edits will be lost.",
+            ):
+                self.update_button.state(["!disabled"])
+            else:
+                def installed(_result, install_error):
+                    if install_error:
+                        self.update_button.state(["!disabled"])
+                        messagebox.showerror("Update failed", str(install_error))
+                    else:
+                        self.destroy()
+
+                self._run_in_background(lambda: updater.install_release(release), installed)
+
+        self._run_in_background(updater.latest_release, checked)
 
     # ---------- garage page ----------
 

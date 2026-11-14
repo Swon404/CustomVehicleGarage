@@ -1,0 +1,67 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: Set release version
+        shell: pwsh
+        run: |
+          $version = "0.${{ github.run_number }}.${{ github.run_attempt }}"
+          "VERSION = `"$version`"" | Set-Content vehiclegarage/version.py -Encoding utf8
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build Windows executable
+        run: |
+          python -m pip install pyinstaller==6.22.3
+          python -m PyInstaller --noconfirm --onefile --windowed --name CustomVehicleGarage garage.py
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CustomVehicleGarage-${{ env.APP_VERSION }}
+          path: dist/CustomVehicleGarage.exe
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built executable
+        uses: actions/download-artifact@v4
+        with:
+          name: CustomVehicleGarage-0.${{ github.run_number }}.${{ github.run_attempt }}
+          path: dist
+      - name: Publish latest main build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $env:APP_VERSION = "0.${{ github.run_number }}.${{ github.run_attempt }}"
+          $headSha = gh api "repos/${{ github.repository }}/commits/main" --jq .sha
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($headSha -ne "${{ github.sha }}") {
+            Write-Host "A newer commit is on main; skipping this release."
+            exit 0
+          }
+          $tag = "v$env:APP_VERSION"
+          gh release create $tag dist/CustomVehicleGarage.exe --draft --target "${{ github.sha }}" --title "Custom Vehicle Garage $tag" --notes "Automated build for commit ${{ github.sha }}."
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
