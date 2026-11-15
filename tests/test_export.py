@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -10,6 +11,10 @@ from vehiclegarage.creations import Creation, Library, slot_conflicts
 from vehiclegarage.kartparam import SECTION_SIZE, KartParam
 from vehiclegarage.machinepara import FILE_SIZE, MachinePara
 from vehiclegarage.stats import BARS
+from vehiclegarage.stats import ADVANCED_FIELDS, format_value
+from vehiclegarage.app import GarageApp
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 
 def stock_kartparam() -> bytes:
@@ -72,6 +77,60 @@ class CreationTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    def test_drive_search_prioritizes_likely_folders_and_can_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("Games/DolphinTool.exe", "Games/game.rvz", "other/another.iso"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            results = []
+            cancel = threading.Event()
+            skipped = disc.search_drive(root, cancel, lambda kind, path: results.append((kind, path)), lambda _: None)
+            self.assertEqual(skipped, 0)
+            self.assertEqual({path.name for _, path in results}, {"DolphinTool.exe", "game.rvz", "another.iso"})
+            self.assertEqual(len(results), 3)
+            self.assertIn(results[0][1].parent.name, ("Games",))
+            found = []
+            def stop_after_first(kind, path):
+                found.append(path)
+                cancel.set()
+            disc.search_drive(root, cancel, stop_after_first, lambda _: None)
+            self.assertEqual(len(found), 1)
+
+    def test_display_rounding_preserves_unedited_stats_and_precise_overrides(self):
+        stock = {bar.field: 0.024000000208616257 for bar in BARS}
+        stock.update({field: 0.01860000006854534 for field, _, _ in ADVANCED_FIELDS})
+        stock["mini_turbo_duration"] = 29
+        overrides = dict(stock)
+        overrides["manual_handling"] = 0.024123456789
+        overrides["tilt"] = 0.018623456789
+        bars = {bar.key: (format_value(overrides[bar.field]), overrides[bar.field]) for bar in BARS}
+        advanced = {field: (format_value(overrides[field]), overrides[field]) for field, _, _ in ADVANCED_FIELDS}
+        app = SimpleNamespace(
+            _bar_values=bars, _advanced_values=advanced,
+            bar_value_vars={key: Mock(get=Mock(return_value=value[0])) for key, value in bars.items()},
+            advanced_vars={key: Mock(get=Mock(return_value=value[0])) for key, value in advanced.items()},
+            _stock_value=lambda _slot, field: stock[field],
+        )
+        self.assertEqual(format_value(78.70999908447266), "78.71")
+        self.assertEqual(GarageApp._collect_stats(app, 0),
+                         {"manual_handling": overrides["manual_handling"], "tilt": overrides["tilt"]})
+        app.advanced_vars["tilt"].get.return_value = "nan"
+        with self.assertRaisesRegex(ValueError, "finite"):
+            GarageApp._collect_stats(app, 0)
+
+    def test_vehicle_selection_updates_existing_cards(self):
+        first, second = Mock(), Mock()
+        app = SimpleNamespace(selected_slot=0, vehicle_buttons={0: first, 1: second},
+                              vehicle_selection_info=Mock(), vehicle_continue_button=Mock(),
+                              _vehicle_selection_text=lambda: "selected", _fill_vehicles=Mock())
+        GarageApp._select_vehicle(app, 1)
+        app._fill_vehicles.assert_not_called()
+        first.config.assert_called_once()
+        second.config.assert_called_once()
+        self.assertEqual(app.selected_slot, 1)
+
     def test_region_specific_parameter_and_message_archives(self):
         for game, suffixes in (
             ("RMCE01", ("M", "Q", "U")),

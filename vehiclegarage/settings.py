@@ -2,8 +2,32 @@
 
 import json
 import os
-from dataclasses import asdict, dataclass
+import ctypes
+import uuid
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+
+def downloads_dir() -> Path:
+    if os.name == "nt":
+        folder_id = (ctypes.c_byte * 16).from_buffer_copy(
+            uuid.UUID("374de290-123f-4565-9164-39c4925e467b").bytes_le
+        )
+        result = ctypes.c_void_p()
+        shell = ctypes.windll.shell32
+        shell.SHGetKnownFolderPath.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        shell.SHGetKnownFolderPath.restype = ctypes.c_long
+        status = shell.SHGetKnownFolderPath(ctypes.byref(folder_id), 0, None, ctypes.byref(result))
+        if status != 0:
+            raise OSError(f"Could not locate the Windows Downloads folder (error {status:#x}).")
+        try:
+            folder = Path(ctypes.wstring_at(result))
+        finally:
+            ctypes.windll.ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+            ctypes.windll.ole32.CoTaskMemFree(result)
+    else:
+        folder = Path.home() / "Downloads"
+    return folder if folder.is_dir() else Path.home()
 
 
 def data_dir() -> Path:
@@ -20,6 +44,22 @@ class Settings:
     install_sd_sync: bool = True
     install_custom: bool = False
     game_id: str = ""
+    recent_folders: dict[str, str] = field(default_factory=dict)
+
+    def picker_folder(self, key: str, existing: str = "", is_file: bool = False) -> Path:
+        remembered = self.recent_folders.get(key)
+        if remembered and Path(remembered).is_dir():
+            return Path(remembered)
+        if existing:
+            candidate = Path(existing).parent if is_file else Path(existing)
+            if candidate.is_dir():
+                return candidate
+        return downloads_dir()
+
+    def remember_folder(self, key: str, chosen: str, is_file: bool, root: Path | None = None) -> None:
+        if chosen:
+            self.recent_folders[key] = str(Path(chosen).parent if is_file else Path(chosen))
+            self.save(root)
 
     @classmethod
     def load(cls, root: Path | None = None) -> "Settings":

@@ -1,10 +1,14 @@
 """The Custom Vehicle Garage desktop app."""
 
 import ctypes
+import math
 import os
 import queue
 import threading
+import time
 import tkinter as tk
+import urllib.parse
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -12,11 +16,11 @@ from vehiclegarage import bmg, disc, dolphin, export, unlock, updater
 from vehiclegarage.creations import Creation, Library, slot_conflicts
 from vehiclegarage.kartparam import KartParam
 from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir, texture_dir
-from vehiclegarage.stats import ADVANCED_FIELDS, BARS
+from vehiclegarage.stats import ADVANCED_FIELDS, BARS, format_value, same_game_value
 from vehiclegarage.texture_browser import TextureBrowser
 from vehiclegarage.textures import TexturePack
 from vehiclegarage.vehicles import VEHICLES, WEIGHT_CLASSES
-from vehiclegarage.version import VERSION
+from vehiclegarage.version import OFFICIAL_RELEASE, VERSION
 
 COLORS = {
     "background": "#07152d",
@@ -31,6 +35,37 @@ COLORS = {
     "danger": "#ff7777",
     "selected": "#755700",
 }
+
+
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.timer = None
+        self.window = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def _schedule(self, _event):
+        self.timer = self.widget.after(500, self._show)
+
+    def _show(self):
+        self.timer = None
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.wm_geometry(f"+{self.widget.winfo_rootx() + 16}+{self.widget.winfo_rooty() + self.widget.winfo_height()}")
+        tk.Label(self.window, text=self.text(), background="#fff4c2", foreground="#17263a",
+                 relief="solid", borderwidth=1, padx=8, pady=5, justify="left", wraplength=400).pack()
+
+    def _hide(self, _event=None):
+        if self.timer is not None:
+            self.widget.after_cancel(self.timer)
+            self.timer = None
+        if self.window is not None:
+            if self.window.winfo_exists():
+                self.window.destroy()
+            self.window = None
 
 
 class GarageApp(tk.Tk):
@@ -73,6 +108,7 @@ class GarageApp(tk.Tk):
         else:
             self.show_page("garage")
         self.after(100, self._poll_events)
+        self.after(250, self._check_update)
 
     # ---------- shared ----------
 
@@ -305,11 +341,11 @@ class GarageApp(tk.Tk):
         self.nav_buttons["setup"].pack(side="right")
         self.update_button = ttk.Button(
             nav,
-            text=f"UPDATE  |  v{VERSION}",
+            text="UPDATE AVAILABLE",
             style="Nav.TButton",
-            command=self._check_update,
+            command=self._install_update,
         )
-        self.update_button.pack(side="right", padx=(0, 7))
+        self.available_release: updater.Release | None = None
 
         self.page_host = ttk.Frame(self, style="App.TFrame", padding=(14, 4, 14, 14))
         self.page_host.pack(fill="both", expand=True)
@@ -318,6 +354,11 @@ class GarageApp(tk.Tk):
         footer = tk.Frame(self, height=24, background=COLORS["footer"])
         footer.pack(fill="x", side="bottom")
         tk.Frame(footer, height=3, background=COLORS["purple"]).pack(fill="x")
+        self.update_status = tk.Label(
+            footer, text=f"v{VERSION}" if OFFICIAL_RELEASE else "Development build", background=COLORS["footer"], foreground="#55545d",
+            font=("Segoe UI", 8), anchor="w", padx=14,
+        )
+        self.update_status.pack(side="left")
         tk.Label(
             footer,
             text="CUSTOM VEHICLE GARAGE",
@@ -393,32 +434,41 @@ class GarageApp(tk.Tk):
         threading.Thread(target=runner, daemon=True).start()
 
     def _check_update(self) -> None:
-        self.update_button.state(["disabled"])
+        if not OFFICIAL_RELEASE:
+            self.update_status.config(text="Development build | Automatic updates unavailable")
+            return
 
         def checked(release, error):
             if error:
-                self.update_button.state(["!disabled"])
-                messagebox.showerror("Update check failed", str(error))
+                self.update_status.config(text=f"v{VERSION}  |  Update check failed: {error}")
             elif release is None:
-                self.update_button.state(["!disabled"])
-                messagebox.showinfo("Up to date", f"Version {VERSION} is the latest available.")
-            elif not messagebox.askyesno(
-                "Update available",
-                f"Version {release.version} is available (you have {VERSION}).\n\n"
-                "Install it and restart now? Unsaved edits will be lost.",
-            ):
-                self.update_button.state(["!disabled"])
+                self.update_status.config(text=f"v{VERSION}  |  Up to date")
             else:
-                def installed(_result, install_error):
-                    if install_error:
-                        self.update_button.state(["!disabled"])
-                        messagebox.showerror("Update failed", str(install_error))
-                    else:
-                        self.destroy()
-
-                self._run_in_background(lambda: updater.install_release(release), installed)
+                self.available_release = release
+                self.update_button.config(text=f"UPDATE TO v{release.version}")
+                self.update_button.pack(side="right", padx=(0, 7), before=self.nav_buttons["setup"])
+                self.update_status.config(text=f"v{VERSION}  |  Update available")
 
         self._run_in_background(updater.latest_release, checked)
+
+    def _install_update(self) -> None:
+        release = self.available_release
+        if release is None or not messagebox.askyesno(
+            "Update available",
+            f"Version {release.version} is available (you have {VERSION}).\n\n"
+            "Install it and restart now? Unsaved edits will be lost.",
+        ):
+            return
+        self.update_button.state(["disabled"])
+
+        def installed(_result, error):
+            if error:
+                self.update_button.state(["!disabled"])
+                messagebox.showerror("Update failed", str(error))
+            else:
+                self.destroy()
+
+        self._run_in_background(lambda: updater.install_release(release), installed)
 
     # ---------- garage page ----------
 
@@ -472,12 +522,16 @@ class GarageApp(tk.Tk):
         self.tree.tag_configure("conflict", foreground=COLORS["danger"])
         self.tree.tag_configure("off", foreground="#85838b")
         self.tree.bind("<Double-1>", lambda _e: self._edit_selected())
+        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_garage_actions())
 
         actions = ttk.Frame(panel, style="Panel.TFrame")
         actions.pack(fill="x", pady=(10, 0))
-        ttk.Button(actions, text="EDIT SELECTED", style="Secondary.TButton", command=self._edit_selected).pack(side="left")
-        ttk.Button(actions, text="INCLUDE / EXCLUDE", style="Secondary.TButton", command=self._toggle_selected).pack(side="left", padx=6)
-        ttk.Button(actions, text="DELETE", style="Secondary.TButton", command=self._delete_selected).pack(side="left")
+        self.edit_selected_button = ttk.Button(actions, text="EDIT SELECTED", style="Secondary.TButton", command=self._edit_selected)
+        self.edit_selected_button.pack(side="left")
+        self.toggle_selected_button = ttk.Button(actions, text="INCLUDE / EXCLUDE", style="Secondary.TButton", command=self._toggle_selected)
+        self.toggle_selected_button.pack(side="left", padx=6)
+        self.delete_selected_button = ttk.Button(actions, text="DELETE", style="Secondary.TButton", command=self._delete_selected)
+        self.delete_selected_button.pack(side="left")
         ttk.Button(
             actions,
             text="BUILD & INSTALL  >",
@@ -540,6 +594,12 @@ class GarageApp(tk.Tk):
             )
         else:
             self.garage_note.config(text="")
+        self._update_garage_actions()
+
+    def _update_garage_actions(self) -> None:
+        state = ["!disabled"] if self.tree.selection() else ["disabled"]
+        for button in (self.edit_selected_button, self.toggle_selected_button, self.delete_selected_button):
+            button.state(state)
 
     def _toggle_selected(self) -> None:
         creation = self._selected_creation()
@@ -638,6 +698,7 @@ class GarageApp(tk.Tk):
             lambda event: self.vehicle_canvas.itemconfigure(self.vehicle_grid_window, width=event.width),
         )
         self.visible_slots: list[int] = []
+        self.vehicle_buttons: dict[int, tk.Button] = {}
 
         selection = ttk.Frame(panel, style="Panel.TFrame", padding=(10, 8, 10, 0))
         selection.pack(fill="x", pady=(8, 0))
@@ -668,6 +729,7 @@ class GarageApp(tk.Tk):
             return
         for child in self.vehicle_grid.winfo_children():
             child.destroy()
+        self.vehicle_buttons.clear()
 
         wanted_class = self.vehicle_class_filter.get()
         wanted_kind = self.vehicle_kind_filter.get()
@@ -681,12 +743,24 @@ class GarageApp(tk.Tk):
             and (wanted_kind == "All" or vehicle.kind == wanted_kind)
             and (not query or query in vehicle.name.lower())
         ]
+        used: dict[int, list[Creation]] = {}
+        for creation in self.library.all():
+            used.setdefault(creation.slot, []).append(creation)
         for index, vehicle in enumerate(visible):
             row, column = divmod(index, 3)
             selected = vehicle.slot == self.selected_slot
+            occupants = []
+            for creation in used.get(vehicle.slot, []):
+                if self.editing is not None and creation.number == self.editing.number:
+                    occupants.append(f"{creation.name} (editing)")
+                elif not creation.enabled:
+                    occupants.append(f"{creation.name} (excluded)")
+                else:
+                    occupants.append(f"{creation.name} (in mod)")
             button = tk.Button(
                 self.vehicle_grid,
-                text=f"{vehicle.name}\n{vehicle.kind.upper()}  /  {vehicle.weight_label.upper()}",
+                text=(f"{vehicle.name}\n{vehicle.kind.upper()}  /  {vehicle.weight_label.upper()}"
+                      + ("\nSAVED: " + ", ".join(occupants) if occupants else "")),
                 command=lambda slot=vehicle.slot: self._select_vehicle(slot),
                 background=COLORS["selected"] if selected else COLORS["panel_alt"],
                 foreground=COLORS["text"],
@@ -706,6 +780,7 @@ class GarageApp(tk.Tk):
             )
             button.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
             self.visible_slots.append(vehicle.slot)
+            self.vehicle_buttons[vehicle.slot] = button
 
         self.vehicle_selection_info.configure(text=self._vehicle_selection_text())
         if self.selected_slot is None:
@@ -723,8 +798,16 @@ class GarageApp(tk.Tk):
         )
 
     def _select_vehicle(self, slot: int) -> None:
+        old = self.selected_slot
         self.selected_slot = slot
-        self._fill_vehicles()
+        for current in (old, slot):
+            button = self.vehicle_buttons.get(current)
+            if button:
+                selected = current == slot
+                button.config(background=COLORS["selected"] if selected else COLORS["panel_alt"],
+                              highlightbackground=COLORS["gold"] if selected else COLORS["panel_alt"])
+        self.vehicle_selection_info.configure(text=self._vehicle_selection_text())
+        self.vehicle_continue_button.state(["!disabled"])
 
     def _continue_vehicle_selection(self) -> None:
         if self.selected_slot is not None:
@@ -738,7 +821,9 @@ class GarageApp(tk.Tk):
         actions.pack(side="bottom", fill="x", pady=(10, 0))
         ttk.Button(actions, text="< BACK TO GARAGE", style="Secondary.TButton", command=self._cancel_editing).pack(side="left")
         ttk.Button(actions, text="RESET STATS", style="Secondary.TButton", command=self._reset_to_stock).pack(side="left", padx=8)
-        ttk.Button(actions, text="SAVE VEHICLE", style="Primary.TButton", command=self._save_creation).pack(side="right")
+        self.save_vehicle_button = ttk.Button(actions, text="SAVE VEHICLE", style="Primary.TButton", command=self._save_creation)
+        self.save_vehicle_button.pack(side="right")
+        self.save_vehicle_button.state(["disabled"])
 
         scroll_area = ttk.Frame(page, style="App.TFrame")
         scroll_area.pack(fill="both", expand=True)
@@ -770,7 +855,7 @@ class GarageApp(tk.Tk):
         identity.pack(fill="x")
         identity_left = ttk.Frame(identity, style="Panel.TFrame")
         identity_left.pack(side="left", fill="x", expand=True)
-        ttk.Label(identity_left, text="IN-GAME NAME", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(identity_left, text="IN-GAME NAME (REQUIRED)", style="Section.TLabel").pack(anchor="w")
         name_row = ttk.Frame(identity_left, style="Panel.TFrame")
         name_row.pack(anchor="w", pady=(4, 0))
         self.name_var = tk.StringVar()
@@ -789,7 +874,10 @@ class GarageApp(tk.Tk):
         texture_row = ttk.Frame(identity_left, style="Panel.TFrame")
         texture_row.pack(anchor="w", pady=(8, 0))
         ttk.Button(texture_row, text="BROWSE TEXTURES", style="Secondary.TButton", command=self._browse_textures).pack(side="left")
-        ttk.Button(texture_row, text="CLEAR", style="Secondary.TButton", command=self._clear_texture).pack(side="left", padx=6)
+        self.clear_texture_button = ttk.Button(texture_row, text="CLEAR", style="Secondary.TButton", command=self._clear_texture)
+        self.clear_texture_button.pack(side="left", padx=6)
+        self.texture_source_button = ttk.Button(texture_row, text="SOURCE", style="Secondary.TButton", command=self._open_texture_source)
+        self.texture_source_button.pack(side="left")
         self.texture_label = ttk.Label(identity_left, text="Texture: stock appearance", style="Panel.TLabel", wraplength=410)
         self.texture_label.pack(anchor="w", pady=(4, 0))
 
@@ -821,30 +909,31 @@ class GarageApp(tk.Tk):
         self.bar_vars: dict[str, tk.DoubleVar] = {}
         self.bar_value_vars: dict[str, tk.StringVar] = {}
         self.bar_stock_labels: dict[str, ttk.Label] = {}
+        self._bar_values: dict[str, tuple[str, float | int]] = {}
+        self._advanced_values: dict[str, tuple[str, float | int]] = {}
         self._syncing_bar = False
         for row, bar in enumerate(BARS):
-            ttk.Label(bars, text=bar.label.upper(), width=15, style="Panel.TLabel").grid(
-                row=row,
-                column=0,
-                sticky="w",
-                pady=3,
-            )
+            label = ttk.Label(bars, text=bar.label.upper(), width=15, style="Panel.TLabel")
+            label.grid(row=row, column=0, sticky="w", pady=3)
             var = tk.DoubleVar(value=50.0)
             self.bar_vars[bar.key] = var
-            ttk.Scale(
+            scale = ttk.Scale(
                 bars,
                 from_=0,
                 to=100,
                 variable=var,
                 length=310,
                 command=lambda _v, b=bar: self._bar_moved(b),
-            ).grid(row=row, column=1, padx=10, pady=3, sticky="ew")
+            )
+            scale.grid(row=row, column=1, padx=10, pady=3, sticky="ew")
             value_var = tk.StringVar()
             self.bar_value_vars[bar.key] = value_var
             entry = ttk.Entry(bars, textvariable=value_var, width=13)
             entry.grid(row=row, column=2, padx=4, pady=3)
             entry.bind("<Return>", lambda _e, b=bar: self._numeric_bar_edited(b))
             entry.bind("<FocusOut>", lambda _e, b=bar: self._numeric_bar_edited(b))
+            for widget in (label, scale, entry):
+                ToolTip(widget, lambda b=bar: self._stat_tooltip(b.field, b.hint, b.low, b.high))
             stock_label = ttk.Label(bars, text="", width=16, style="Panel.TLabel")
             stock_label.grid(row=row, column=3, sticky="w", padx=8)
             self.bar_stock_labels[bar.key] = stock_label
@@ -879,32 +968,46 @@ class GarageApp(tk.Tk):
             style="Panel.TLabelframe",
         )
         self.advanced_vars: dict[str, tk.StringVar] = {}
-        for i, (field, label, _hint) in enumerate(ADVANCED_FIELDS):
+        for i, (field, label, hint) in enumerate(ADVANCED_FIELDS):
             var = tk.StringVar()
             self.advanced_vars[field] = var
             row, column = divmod(i, 2)
-            ttk.Label(self.advanced_frame, text=label, width=27, style="Panel.TLabel").grid(
-                row=row,
-                column=column * 2,
-                sticky="w",
-                pady=2,
-            )
-            ttk.Entry(self.advanced_frame, textvariable=var, width=12).grid(
-                row=row,
-                column=column * 2 + 1,
-                padx=(2, 18),
-                pady=2,
-            )
+            label_widget = ttk.Label(self.advanced_frame, text=label, width=27, style="Panel.TLabel")
+            label_widget.grid(row=row, column=column * 2, sticky="w", pady=2)
+            entry = ttk.Entry(self.advanced_frame, textvariable=var, width=12)
+            entry.grid(row=row, column=column * 2 + 1, padx=(2, 18), pady=2)
+            for widget in (label_widget, entry):
+                ToolTip(widget, lambda f=field, h=hint: self._stat_tooltip(f, h))
+
+    def _stat_tooltip(self, field: str, hint: str, low=None, high=None) -> str:
+        text = hint
+        if low is not None:
+            text += f"\nSlider range: {format_value(low)} to {format_value(high)} (values outside are allowed)."
+        if self.stock is not None:
+            values = [vehicle.get(field) for vehicle in self.stock.vehicles]
+            text += f"\nStock vehicles: {format_value(min(values))} to {format_value(max(values))}."
+        return text
 
     def _toggle_advanced(self) -> None:
         if self.advanced_open.get():
             self.advanced_frame.pack(fill="x", pady=6)
+            self.after_idle(self._scroll_to_advanced)
         else:
             self.advanced_frame.pack_forget()
+
+    def _scroll_to_advanced(self) -> None:
+        if self.advanced_open.get():
+            self.editor_canvas.update_idletasks()
+            bounds = self.editor_canvas.bbox("all")
+            if bounds and bounds[3] > 0:
+                self.editor_canvas.yview_moveto(self.advanced_frame.winfo_y() / bounds[3])
 
     def _update_name_counter(self) -> None:
         units = len(self.name_var.get().encode("utf-16-be", errors="surrogatepass")) // 2
         self.name_counter.config(text=f"{units} / {bmg.MAX_VEHICLE_NAME_CODE_UNITS}")
+        self.save_vehicle_button.state(
+            ["!disabled"] if self.selected_slot is not None else ["disabled"]
+        )
 
     def _change_stock_vehicle(self) -> None:
         self._changing_stock_vehicle = True
@@ -933,13 +1036,24 @@ class GarageApp(tk.Tk):
         self.edit_texture = None
         self._refresh_texture_label()
 
+    def _open_texture_source(self) -> None:
+        if self.edit_texture and self.edit_texture.source:
+            if not webbrowser.open(self.edit_texture.source):
+                messagebox.showerror("Open browser", "Could not open the texture source.")
+
     def _refresh_texture_label(self) -> None:
         if self.edit_texture:
+            self.clear_texture_button.state(["!disabled"])
+            parsed = urllib.parse.urlsplit(self.edit_texture.source)
+            self.texture_source_button.state(["!disabled"] if parsed.scheme in ("https", "http") and parsed.netloc else ["disabled"])
+            credit = f" by {self.edit_texture.author}" if self.edit_texture.author else ""
             self.texture_label.config(
-                text=f"Texture: {self.edit_texture.name} ({len(self.edit_texture.files)} race files). "
+                text=f"Texture: {self.edit_texture.name}{credit} ({len(self.edit_texture.files)} race files). "
                      "The in-game selection preview remains stock."
             )
         else:
+            self.clear_texture_button.state(["disabled"])
+            self.texture_source_button.state(["disabled"])
             self.texture_label.config(text="Texture: stock appearance")
 
     def _current_slot(self) -> int | None:
@@ -963,12 +1077,16 @@ class GarageApp(tk.Tk):
             self._set_bar_value(bar, value, slot)
         for field, _label, _hint in ADVANCED_FIELDS:
             value = overrides.get(field, self._stock_value(slot, field))
-            self.advanced_vars[field].set(f"{value:.4g}")
+            shown = format_value(value)
+            self._advanced_values[field] = (shown, value)
+            self.advanced_vars[field].set(shown)
 
     def _set_bar_value(self, bar, value, slot: int) -> None:
         self._syncing_bar = True
         self.bar_vars[bar.key].set(bar.to_percent(float(value)))
-        self.bar_value_vars[bar.key].set(str(value))
+        shown = format_value(value)
+        self._bar_values[bar.key] = (shown, value)
+        self.bar_value_vars[bar.key].set(shown)
         self._syncing_bar = False
         stock = self._stock_value(slot, bar.field)
         self.bar_stock_labels[bar.key].config(text=f"Stock: {stock:g}")
@@ -980,13 +1098,17 @@ class GarageApp(tk.Tk):
         if slot is None:
             return
         value = bar.from_percent(self.bar_vars[bar.key].get())
-        self.bar_value_vars[bar.key].set(str(value))
+        shown = format_value(value)
+        self._bar_values[bar.key] = (shown, value)
+        self.bar_value_vars[bar.key].set(shown)
         stock = self._stock_value(slot, bar.field)
         self.bar_stock_labels[bar.key].config(text=f"Stock: {stock:g}")
 
     def _numeric_bar_edited(self, bar) -> None:
         try:
-            value = bar.parse_value(self.bar_value_vars[bar.key].get().strip())
+            text = self.bar_value_vars[bar.key].get().strip()
+            shown, original = self._bar_values[bar.key]
+            value = original if text == shown else bar.parse_value(text)
         except ValueError as err:
             messagebox.showwarning("Check the stat value", str(err))
             return
@@ -1023,19 +1145,23 @@ class GarageApp(tk.Tk):
     def _collect_stats(self, slot: int) -> dict:
         stats: dict = {}
         for bar in BARS:
-            value = bar.parse_value(self.bar_value_vars[bar.key].get().strip())
+            text = self.bar_value_vars[bar.key].get().strip()
+            shown, original = self._bar_values[bar.key]
+            value = original if text == shown else bar.parse_value(text)
             stock = self._stock_value(slot, bar.field)
-            tolerance = (bar.high - bar.low) / 200
-            if abs(value - stock) > tolerance:
+            if (value != stock if bar.is_int else not same_game_value(value, stock)):
                 stats[bar.field] = value
         for field, label, _hint in ADVANCED_FIELDS:
             text = self.advanced_vars[field].get().strip()
             try:
-                value = float(text)
+                shown, original = self._advanced_values[field]
+                value = original if text == shown else float(text)
             except ValueError:
                 raise ValueError(f"{label} must be a number, got '{text}'") from None
+            if not math.isfinite(value) or abs(value) > 3.402823466e38:
+                raise ValueError(f"{label} must be a finite 32-bit float")
             stock = self._stock_value(slot, field)
-            if abs(value - stock) > max(abs(stock) * 1e-3, 1e-6):
+            if not same_game_value(value, stock):
                 stats[field] = value
         return stats
 
@@ -1047,6 +1173,7 @@ class GarageApp(tk.Tk):
             return
         if not name:
             messagebox.showwarning("Name it", "Give your creation a name.")
+            self.name_entry.focus_set()
             return
         if not bmg.vehicle_name_fits_ui_limit(name):
             messagebox.showwarning(
@@ -1248,8 +1375,23 @@ class GarageApp(tk.Tk):
 
         self._run_in_background(work, done)
 
+    def _choose_path(self, key: str, *, is_file: bool, existing: str = "", parent=None, **options) -> str:
+        try:
+            initial = self.settings.picker_folder(key, existing, is_file)
+        except OSError as err:
+            messagebox.showerror("Choose folder", str(err), parent=parent or self)
+            return ""
+        dialog = filedialog.askopenfilename if is_file else filedialog.askdirectory
+        chosen = dialog(parent=parent or self, initialdir=str(initial), **options)
+        if chosen:
+            try:
+                self.settings.remember_folder(key, chosen, is_file, self.root_dir)
+            except OSError as err:
+                messagebox.showwarning("Remember folder", f"Could not save the selected folder: {err}", parent=parent or self)
+        return chosen
+
     def _browse_dir(self, var: tk.StringVar) -> None:
-        chosen = filedialog.askdirectory(initialdir=var.get() or None)
+        chosen = self._choose_path("install_folder", is_file=False, existing=var.get())
         if chosen:
             var.set(chosen)
 
@@ -1381,6 +1523,7 @@ class GarageApp(tk.Tk):
         form.pack(fill="x")
         self.disc_var = tk.StringVar(value=self.settings.disc)
         self.tool_var = tk.StringVar(value=self.settings.dolphintool)
+        self._importing = False
         ttk.Label(form, text="GAME IMAGE", style="Panel.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.disc_var, width=70).grid(row=0, column=1, padx=8)
         ttk.Button(form, text="BROWSE", style="Secondary.TButton", command=self._browse_disc).grid(row=0, column=2)
@@ -1389,10 +1532,23 @@ class GarageApp(tk.Tk):
         ttk.Button(form, text="BROWSE", style="Secondary.TButton", command=self._browse_tool).grid(
             row=1, column=2, pady=(8, 0)
         )
-        ttk.Button(form, text="FIND", style="Secondary.TButton", command=self._autodetect_tool).grid(
-            row=1, column=3, padx=6, pady=(8, 0)
-        )
         form.columnconfigure(1, weight=1)
+        search_row = ttk.Frame(page, style="App.TFrame")
+        search_row.pack(fill="x", pady=(10, 0))
+        ttk.Label(search_row, text="Or search a drive:", style="App.TLabel").pack(side="left")
+        if os.name == "nt":
+            mask = ctypes.windll.kernel32.GetLogicalDrives()
+            drives = [f"{chr(65 + i)}:\\" for i in range(26) if mask & (1 << i)
+                      and ctypes.windll.kernel32.GetDriveTypeW(f"{chr(65 + i)}:\\") in (2, 3)]
+        else:
+            drives = [Path.cwd().anchor]
+        selected_drive = Path(self.settings.disc).anchor if self.settings.disc else Path.cwd().anchor
+        self.search_drive_var = tk.StringVar(value=selected_drive if selected_drive in drives else (drives[0] if drives else ""))
+        ttk.Combobox(search_row, textvariable=self.search_drive_var, values=drives, state="readonly", width=8).pack(side="left", padx=8)
+        self.search_drive_button = ttk.Button(search_row, text="SEARCH DRIVE", style="Secondary.TButton", command=self._search_setup_drive)
+        self.search_drive_button.pack(side="left")
+        if not drives:
+            self.search_drive_button.state(["disabled"])
         self.import_button = ttk.Button(
             page,
             text="IMPORT GAME DATA",
@@ -1417,9 +1573,90 @@ class GarageApp(tk.Tk):
         ).pack(anchor="w")
         if not self.settings.dolphintool:
             self._autodetect_tool(quiet=True)
+        self.disc_var.trace_add("write", lambda *_: self._update_import_button())
+        self.tool_var.trace_add("write", lambda *_: self._update_import_button())
+        self._update_import_button()
+
+    def _update_import_button(self) -> None:
+        valid = (not self._importing and Path(self.disc_var.get().strip()).is_file()
+                 and Path(self.tool_var.get().strip()).is_file())
+        self.import_button.state(["!disabled"] if valid else ["disabled"])
+
+    def _search_setup_drive(self) -> None:
+        root = Path(self.search_drive_var.get())
+        window = tk.Toplevel(self)
+        window.title(f"Search {root}")
+        window.transient(self)
+        window.geometry("800x500")
+        window.configure(background=COLORS["background"])
+        cancelled = threading.Event()
+        ttk.Label(window, text="Select a game image and/or DolphinTool, then choose USE SELECTED.",
+                  style="Muted.TLabel").pack(anchor="w", padx=12, pady=10)
+        body = ttk.Frame(window, style="App.TFrame")
+        body.pack(fill="both", expand=True, padx=12)
+        lists = {}
+        for kind, title in (("image", "GAME IMAGES"), ("tool", "DOLPHIN TOOL")):
+            section = ttk.Frame(body, style="App.TFrame")
+            section.pack(side="left", fill="both", expand=True, padx=4)
+            ttk.Label(section, text=title, style="Section.TLabel").pack(anchor="w")
+            box = tk.Listbox(section, exportselection=False, background=COLORS["panel"],
+                             foreground=COLORS["text"], selectbackground=COLORS["selected"])
+            box.pack(fill="both", expand=True)
+            lists[kind] = box
+        status = ttk.Label(window, text="Searching likely locations first...", style="Muted.TLabel", wraplength=760)
+        status.pack(anchor="w", padx=12, pady=6)
+        actions = ttk.Frame(window, style="App.TFrame")
+        actions.pack(fill="x", padx=12, pady=8)
+        stop = ttk.Button(actions, text="STOP SEARCH", style="Secondary.TButton", command=cancelled.set)
+        stop.pack(side="left")
+        use = ttk.Button(actions, text="USE SELECTED", style="Primary.TButton")
+        use.pack(side="right")
+        use.state(["disabled"])
+
+        def selection_changed(_event=None):
+            use.state(["!disabled"] if any(box.curselection() for box in lists.values()) else ["disabled"])
+        for box in lists.values():
+            box.bind("<<ListboxSelect>>", selection_changed)
+
+        def close():
+            cancelled.set()
+            window.destroy()
+        window.protocol("WM_DELETE_WINDOW", close)
+
+        def apply_selection():
+            for kind, var in (("image", self.disc_var), ("tool", self.tool_var)):
+                selected = lists[kind].curselection()
+                if selected:
+                    var.set(lists[kind].get(selected[0]))
+            close()
+        use.config(command=apply_selection)
+
+        last_report = 0.0
+        def found(kind, path):
+            def update():
+                if window.winfo_exists():
+                    lists[kind].insert("end", str(path))
+            self.events.put(update)
+        def report(path):
+            nonlocal last_report
+            now = time.monotonic()
+            if now - last_report >= 0.5:
+                last_report = now
+                self.events.put(lambda: status.config(text=f"Searching: {path}") if window.winfo_exists() else None)
+        def done(skipped, error):
+            if not window.winfo_exists():
+                return
+            stop.state(["disabled"])
+            if error:
+                status.config(text=f"Search failed: {error}")
+            else:
+                state = "Stopped" if cancelled.is_set() else "Finished"
+                status.config(text=f"{state}. {skipped} folders could not be read. Select results to use.")
+        self._run_in_background(lambda: disc.search_drive(root, cancelled, found, report), done)
 
     def _browse_disc(self) -> None:
-        chosen = filedialog.askopenfilename(
+        chosen = self._choose_path(
+            "game_image", is_file=True, existing=self.disc_var.get(),
             title="Mario Kart Wii image",
             filetypes=[("Game images", "*.iso *.rvz *.wbfs *.wia *.gcz *.ciso"), ("All files", "*.*")],
         )
@@ -1427,7 +1664,10 @@ class GarageApp(tk.Tk):
             self.disc_var.set(chosen)
 
     def _browse_tool(self) -> None:
-        chosen = filedialog.askopenfilename(title="DolphinTool.exe", filetypes=[("DolphinTool", "DolphinTool.exe"), ("All files", "*.*")])
+        chosen = self._choose_path(
+            "dolphin_tool", is_file=True, existing=self.tool_var.get(), title="DolphinTool.exe",
+            filetypes=[("DolphinTool", "DolphinTool.exe"), ("All files", "*.*")],
+        )
         if chosen:
             self.tool_var.set(chosen)
 
@@ -1465,10 +1705,12 @@ class GarageApp(tk.Tk):
             messagebox.showwarning("DolphinTool", "Choose DolphinTool.exe from your Dolphin folder.")
             return
         self.import_button.state(["disabled"])
+        self._importing = True
         self.setup_status.config(text="Importing...")
 
         def done(game_id, error):
-            self.import_button.state(["!disabled"])
+            self._importing = False
+            self._update_import_button()
             if error:
                 self.setup_status.config(text=f"Import failed: {error}")
                 return

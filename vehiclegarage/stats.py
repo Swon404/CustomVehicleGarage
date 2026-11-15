@@ -5,11 +5,21 @@ a view of the real number that gets written to the game.
 """
 
 import math
+import struct
 from dataclasses import dataclass
 
 from vehiclegarage.kartparam import FIELD_INDEX, _INT_FIELDS
 
 DISPLAY_RATING_MAX = 20
+
+
+def format_value(value: float | int) -> str:
+    """Make float32 noise readable without changing the underlying value."""
+    return str(value) if isinstance(value, int) else f"{value:.6g}"
+
+
+def same_game_value(first: float | int, second: float | int) -> bool:
+    return struct.pack(">f", float(first)) == struct.pack(">f", float(second))
 
 
 @dataclass(frozen=True)

@@ -70,7 +70,7 @@ def launch_mod(exe: Path, image: Path, game_id: str, root: Path, preset: Path) -
     if not image.is_file():
         raise ValueError("The configured game image was not found. Choose it on the Setup page.")
     xml = root / "riivolution" / f"{MOD_FOLDER}.xml"
-    if not xml.is_file() or not (root / MOD_FOLDER / "Race" / "Common.szs").is_file():
+    if not xml.is_file() or not (root / MOD_FOLDER).is_dir():
         raise ValueError("The Dolphin Riivolution installation is missing. Build the mod first.")
     try:
         patch = ElementTree.parse(xml).getroot()
@@ -83,9 +83,6 @@ def launch_mod(exe: Path, image: Path, game_id: str, root: Path, preset: Path) -
             or choice.get("id") != "customvehiclegarage" or patch_definition is None):
         raise ValueError("The installed Riivolution patch does not match the selected game.")
     entries = patch_definition.findall("file")
-    if not any(entry.get("disc") == "/Race/Common.szs"
-               and entry.get("external") == f"/{MOD_FOLDER}/Race/Common.szs" for entry in entries):
-        raise ValueError("The installed Riivolution patch is missing Race/Common.szs.")
     for entry in entries:
         external = entry.get("external", "")
         parts = external.split("/")

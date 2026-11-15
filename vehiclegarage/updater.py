@@ -104,9 +104,18 @@ try {
     catch {
         if (Get-Process -Id $ParentId -ErrorAction SilentlyContinue) { throw 'The app did not close in time.' }
     }
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $running = @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($Target)) -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -eq $Target })
+        if ($running.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    if ($running.Count -gt 0) { throw 'The app is still running. Close all copies and try again.' }
     Copy-Item -LiteralPath $Target -Destination $backup
     try {
         Copy-Item -LiteralPath $Source -Destination $Target -Force
+        $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
         Start-Process -FilePath $Target -WorkingDirectory (Split-Path -Parent $Target)
     } catch {
         Copy-Item -LiteralPath $backup -Destination $Target -Force
@@ -142,7 +151,7 @@ def install_release(release: Release) -> None:
                 "-File", str(script), "-Source", str(download), "-Target", str(target),
                 "-ParentId", str(os.getpid()), "-WorkDir", str(work_dir),
             ],
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

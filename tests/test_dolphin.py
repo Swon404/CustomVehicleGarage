@@ -6,8 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from vehiclegarage import dolphin, export
+from tests.test_export import fake_name_szs
+from vehiclegarage import disc, dolphin, export
 from vehiclegarage.app import GarageApp
+from vehiclegarage.creations import Creation
 
 
 class DolphinFolderTests(unittest.TestCase):
@@ -81,6 +83,29 @@ class DolphinFolderTests(unittest.TestCase):
                     dolphin.launch_mod(exe, image, "RMCP01", sd_root, preset)
                 popen.assert_not_called()
                 self.assertFalse(preset.exists())
+
+    def test_build_and_launch_name_only_mod_without_gameplay_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe = root / "Dolphin.exe"
+            image = root / "game.rvz"
+            exe.touch()
+            image.touch()
+            game = root / "game"
+            for archive in disc.localized_message_archives("RMCJ01"):
+                path = game / archive
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(fake_name_szs())
+            output = root / "output"
+            export.build_mod(game, "RMCJ01", [Creation("Garage", slot=0)], output)
+            self.assertFalse((output / export.MOD_FOLDER / "Race" / "Common.szs").exists())
+            with patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
+                dolphin.launch_mod(exe, image, "RMCJ01", output, root / "preset.json")
+                missing = output / export.MOD_FOLDER / disc.localized_message_archives("RMCJ01")[0]
+                missing.unlink()
+                with self.assertRaisesRegex(ValueError, "missing or invalid"):
+                    dolphin.launch_mod(exe, image, "RMCJ01", output, root / "preset.json")
+            popen.assert_called_once()
 
     def test_build_and_play_installs_current_mod_to_dolphin_before_launch(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -45,6 +45,7 @@ LANGUAGE_SUFFIXES_BY_REGION = {
 }
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+IMAGE_SUFFIXES = frozenset((".iso", ".rvz", ".wbfs", ".wia", ".gcz", ".ciso"))
 
 
 class DiscError(RuntimeError):
@@ -100,6 +101,45 @@ def find_dolphintool(extra_dirs: list[Path] | None = None) -> Path | None:
             return candidate
     found = shutil.which("DolphinTool") or shutil.which("dolphin-tool")
     return Path(found) if found else None
+
+
+def search_drive(root: Path, cancelled, found, report) -> int:
+    """Search likely folders first, then the rest of the selected drive."""
+    root = Path(root)
+    preferred = [root / "Games", root / "Dolphin", root / "code"]
+    home = Path.home()
+    if home == root or root in home.parents:
+        preferred[:0] = [home / "Downloads", home / "Documents", home / "Desktop"]
+    visited: set[str] = set()
+    skipped = 0
+
+    def onerror(_error):
+        nonlocal skipped
+        skipped += 1
+
+    for start in [*preferred, root]:
+        if cancelled.is_set():
+            break
+        if not start.is_dir():
+            continue
+        for directory, subdirs, files in os.walk(start, topdown=True, onerror=onerror, followlinks=False):
+            if cancelled.is_set():
+                return skipped
+            key = os.path.normcase(os.path.abspath(directory))
+            if key in visited:
+                subdirs.clear()
+                continue
+            visited.add(key)
+            report(Path(directory))
+            for name in files:
+                if cancelled.is_set():
+                    return skipped
+                path = Path(directory) / name
+                if name.casefold() == "dolphintool.exe":
+                    found("tool", path)
+                elif path.suffix.casefold() in IMAGE_SUFFIXES:
+                    found("image", path)
+    return skipped
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:

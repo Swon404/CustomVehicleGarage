@@ -1,12 +1,17 @@
 import hashlib
 import io
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from vehiclegarage import updater
+from vehiclegarage.app import GarageApp
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 
 class Response(io.BytesIO):
@@ -70,6 +75,48 @@ class UpdateTests(unittest.TestCase):
         with patch.object(updater.sys, "frozen", False, create=True):
             with self.assertRaisesRegex(updater.UpdateError, "Windows executable"):
                 updater.install_release(updater.Release("0.2.1", "", ""))
+
+    def test_startup_shows_update_button_only_for_new_release(self):
+        release = updater.Release("0.2.1", "https://github.com/download", "a" * 64)
+        with patch("vehiclegarage.app.OFFICIAL_RELEASE", True):
+            for result in (None, release):
+                app = SimpleNamespace(
+                    update_button=Mock(), update_status=Mock(), nav_buttons={"setup": Mock()},
+                    available_release=None,
+                    _run_in_background=lambda work, done, result=result: done(result, None),
+                )
+                GarageApp._check_update(app)
+                self.assertEqual(app.update_button.pack.called, result is not None)
+                self.assertEqual(app.available_release, result)
+
+    def test_development_build_does_not_offer_update(self):
+        app = SimpleNamespace(update_status=Mock(), _run_in_background=Mock())
+        with patch("vehiclegarage.app.OFFICIAL_RELEASE", False):
+            GarageApp._check_update(app)
+        app._run_in_background.assert_not_called()
+        self.assertIn("Development build", app.update_status.config.call_args.kwargs["text"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows updater")
+    def test_installer_starts_a_no_window_helper_for_frozen_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            target = root / "CustomVehicleGarage.exe"
+            target.touch()
+            def download(_release, destination):
+                destination.write_bytes(b"verified test download")
+            with patch.object(updater.sys, "frozen", True, create=True), \
+                    patch.object(updater.sys, "executable", str(target)), \
+                    patch.object(updater.tempfile, "mkdtemp", return_value=str(work)), \
+                    patch.object(updater, "download_release", side_effect=download), \
+                    patch.object(updater.subprocess, "Popen") as popen:
+                updater.install_release(updater.Release("0.2.1", "", ""))
+            flags = popen.call_args.kwargs["creationflags"]
+            self.assertTrue(flags & subprocess.CREATE_NO_WINDOW)
+            self.assertFalse(flags & subprocess.DETACHED_PROCESS)
+            script = (work / "install.ps1").read_text(encoding="utf-8")
+            self.assertIn("PYINSTALLER_RESET_ENVIRONMENT", script)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 import zipfile
@@ -129,6 +130,81 @@ class TextureTests(unittest.TestCase):
             self.assertEqual(details["preview"], "https://mkwiiki.org/w/images/preview.jpg")
             self.assertEqual(details["downloads"], ["https://example.com/file.zip"])
             self.assertEqual(json.loads((cache / "catalogue.json").read_text()), ["First", "Second"])
+
+    def test_vehicle_search_uses_generic_standard_name_and_page_content(self):
+        response = {"query": {"search": [{"title": "Space Kart (Standard Kart Texture)"},
+                                         {"title": "Another page"}]}}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(textures, "_api", return_value=response) as api:
+            result = textures.vehicle_search("Standard Kart S", Path(tmp))
+            self.assertIn("Space Kart (Standard Kart Texture)", result)
+            self.assertEqual(api.call_args.args[0]["srsearch"], '"Standard Kart"')
+            self.assertEqual(textures.vehicle_search("Standard Kart M", Path(tmp)), result)
+            self.assertEqual(api.call_count, 1)
+
+    def test_vehicle_index_handles_multiple_vehicles_rowspans_and_canonical_titles(self):
+        html = """
+        <table><tr><th>Title</th><th>Character</th><th>Vehicle</th><th>Type</th></tr>
+        <tr><td rowspan="2"><a href="/wiki/Tails_Doll_%28Baby_Mario_Edit%29">Tails Doll</a></td>
+        <td rowspan="2">Baby Mario</td>
+        <td>Standard Kart S, Booster Seat, Mini Beast, Cheep Charger, Tiny Titan, Blue Falcon</td><td>Texture</td></tr>
+        <tr><td><a href="/wiki/Mach_Bike">Mach Bike</a></td><td>Texture</td></tr>
+        <tr><td><a href="/wiki/Other_%26_Kart">Other &amp; Kart</a></td><td>Mario</td>
+        <td>Standard Kart M</td><td>Texture</td></tr></table>
+        <table><tr><th>Title</th><th>Character</th></tr>
+        <tr><td><a href="/wiki/Ignored">Ignored</a></td><td>Blue Falcon</td></tr></table>
+        """
+        response = {"parse": {"text": {"*": html}}}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(textures, "_api", return_value=response):
+            index = textures.vehicle_index(Path(tmp))
+        title = "Tails Doll (Baby Mario Edit)"
+        for vehicle in ("Standard Kart S", "Booster Seat", "Mini Beast", "Cheep Charger",
+                        "Tiny Titan", "Blue Falcon", "Mach Bike"):
+            self.assertIn(title, index[vehicle])
+        self.assertNotIn(title, index["Standard Kart M"])
+        self.assertEqual(index["Standard Kart M"], ["Other & Kart"])
+        self.assertNotIn("Ignored", index["Blue Falcon"])
+
+    def test_vehicle_index_cache_refresh_and_invalid_data(self):
+        html = ('<table><tr><th>Title</th><th>Vehicle</th></tr>'
+                '<tr><td><a href="/wiki/Test">Test</a></td><td>Blue Falcon</td></tr></table>')
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            with patch.object(textures, "_api", return_value={"parse": {"text": {"*": html}}}) as api:
+                self.assertEqual(textures.vehicle_index(cache), {"Blue Falcon": ["Test"]})
+                self.assertEqual(textures.vehicle_index(cache), {"Blue Falcon": ["Test"]})
+                self.assertEqual(api.call_count, 1)
+                textures.vehicle_index(cache, refresh=True)
+                self.assertEqual(api.call_count, 2)
+                path = cache / "vehicle-index.json"
+                os.utime(path, (0, 0))
+                textures.vehicle_index(cache)
+                self.assertEqual(api.call_count, 3)
+            path.write_text('{"Blue Falcon": [1]}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "invalid"):
+                textures.vehicle_index(cache)
+            with patch.object(textures, "_api", return_value={"parse": {"text": {"*": "<table></table>"}}}):
+                with self.assertRaisesRegex(ValueError, "no recognised"):
+                    textures.vehicle_index(cache, refresh=True)
+
+    def test_gallery_image_is_used_as_preview(self):
+        parser = textures._PageParser()
+        parser.feed('<ul class="gallery mw-gallery-traditional"><li><img src="/w/images/vehicle.png"></li></ul>')
+        self.assertEqual(parser.preview, "https://mkwiiki.org/w/images/vehicle.png")
+
+    def test_creator_credit_survives_pack_storage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "mdf_kart-mr.szs"
+            source.write_bytes(vehicle_archive())
+            pack = textures.import_pack(source, 1, root / "textures", "My pack", "https://mkwiiki.org/wiki/Test", "Creator")
+            library = Library(root / "creations")
+            library.save(Creation("Standard Kart M", slot=1, texture=pack))
+            saved = library.all()[0].texture
+            self.assertEqual(saved.author, "Creator")
+            self.assertEqual(saved.source, "https://mkwiiki.org/wiki/Test")
+            legacy = pack.to_json()
+            del legacy["author"]
+            self.assertEqual(textures.TexturePack.from_json(legacy).author, "")
 
     def test_texture_descriptors_reject_wrong_slot_or_filename(self):
         digest = "a" * 64
