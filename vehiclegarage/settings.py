@@ -41,3 +41,7 @@ def library_dir(root: Path | None = None) -> Path:
 
 def cache_dir(root: Path | None = None) -> Path:
     return (root or data_dir()) / "game"
+
+
+def texture_dir(root: Path | None = None) -> Path:
+    return (root or data_dir()) / "textures"

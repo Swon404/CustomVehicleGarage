@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vehiclegarage.kartparam import FIELD_INDEX
+from vehiclegarage.textures import TexturePack
 
 SLOT_COUNT = 36
 
@@ -16,6 +17,7 @@ class Creation:
     slot: int = 0
     number: int = 0
     enabled: bool = True
+    texture: TexturePack | None = None
 
     def __post_init__(self):
         unknown = set(self.stats) - set(FIELD_INDEX)
@@ -23,15 +25,20 @@ class Creation:
             raise ValueError(f"unknown stat fields: {sorted(unknown)}")
         if not 0 <= self.slot < SLOT_COUNT:
             raise ValueError(f"slot {self.slot} is outside 0..{SLOT_COUNT - 1}")
+        if self.texture and self.texture.slot != self.slot:
+            raise ValueError("texture pack does not match the creation's vehicle slot")
 
     def to_json(self) -> dict:
-        return {
+        data = {
             "number": self.number,
             "name": self.name,
             "slot": self.slot,
             "enabled": self.enabled,
             "stats": self.stats,
         }
+        if self.texture is not None:
+            data["texture"] = self.texture.to_json()
+        return data
 
     @classmethod
     def from_json(cls, data: dict) -> "Creation":
@@ -41,6 +48,7 @@ class Creation:
             slot=data.get("slot", 0),
             number=data.get("number", 0),
             enabled=data.get("enabled", True),
+            texture=TexturePack.from_json(data["texture"]) if data.get("texture") is not None else None,
         )
 
 

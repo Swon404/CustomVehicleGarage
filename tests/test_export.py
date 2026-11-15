@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.test_archives import build_u8
 from tests.test_bmg import build_bmg
@@ -71,6 +72,84 @@ class CreationTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    def test_region_specific_parameter_and_message_archives(self):
+        for game, suffixes in (
+            ("RMCE01", ("M", "Q", "U")),
+            ("RMCP01", ("E", "F", "G", "I", "S")),
+            ("RMCJ01", ("J",)),
+            ("RMCK01", ("K",)),
+        ):
+            with self.subTest(game=game):
+                archives = disc.kartparam_archives(game)
+                self.assertEqual(len(archives), 8)
+                self.assertIn("Race/Common.szs", archives)
+                expected = "Scene/UI/MenuSingle_R.szs" if game == "RMCK01" else "Scene/UI/MenuSingle.szs"
+                self.assertEqual(archives[expected], "parameter/kartParam.bin")
+                names = disc.localized_message_archives(game)
+                self.assertEqual(len(names), 10 * len(suffixes))
+                for suffix in suffixes:
+                    self.assertIn(f"Scene/UI/MenuSingle_{suffix}.szs", names)
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            disc.kartparam_archives("RMCX01")
+
+    def test_korean_export_patches_r_archives_and_k_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            game = root / "game"
+            for archive, inner in disc.kartparam_archives("RMCK01").items():
+                path = game / archive
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(fake_szs(inner))
+            for archive in disc.localized_message_archives("RMCK01"):
+                path = game / archive
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(fake_name_szs())
+            out = root / "out"
+            export.build_mod(game, "RMCK01", [Creation("Garage", {"speed": 90.0}, slot=0)], out)
+            xml = (out / "riivolution" / "CustomVehicleGarage.xml").read_text()
+            self.assertIn('<id game="RMCK"/>', xml)
+            self.assertIn('disc="/Scene/UI/MenuSingle_R.szs"', xml)
+            self.assertIn('disc="/Scene/UI/MenuSingle_K.szs"', xml)
+            params = yaz0.decompress((out / export.MOD_FOLDER / "Scene" / "UI" / "MenuSingle_R.szs").read_bytes())
+            kart = KartParam.from_bytes(u8.read_file(params, "parameter/kartParam.bin"))
+            self.assertEqual(kart.vehicles[0].get("speed"), 90.0)
+            names = yaz0.decompress((out / export.MOD_FOLDER / "Scene" / "UI" / "MenuSingle_K.szs").read_bytes())
+            self.assertEqual(bmg.read_message(u8.read_file(names, "message/Common.bmg"), 9100), "Garage")
+
+    def test_missing_parameter_archives_fail_before_replacing_existing_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "game"
+            (cache / "Race").mkdir(parents=True)
+            (cache / "Race" / "Common.szs").write_bytes(fake_szs("kartParam.bin"))
+            old = root / "out" / export.MOD_FOLDER / "old.txt"
+            old.parent.mkdir(parents=True)
+            old.write_text("keep")
+            with self.assertRaisesRegex(ValueError, "parameter archives"):
+                export.build_mod(cache, "RMCK01", [Creation("Standard Kart M", {"speed": 90}, slot=1)], root / "out")
+            self.assertEqual(old.read_text(), "keep")
+
+    def test_build_stats_and_names_for_each_game_region(self):
+        for game_id, language in (("RMCE01", "U"), ("RMCP01", "E"), ("RMCJ01", "J"), ("RMCK01", "K")):
+            with self.subTest(game_id=game_id), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                cache = root / "game"
+                for archive, inner in disc.kartparam_archives(game_id).items():
+                    path = cache / archive
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(fake_szs(inner))
+                for archive in disc.localized_message_archives(game_id):
+                    path = cache / archive
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(fake_name_szs())
+                out = root / "out"
+                export.build_mod(cache, game_id, [Creation("Garage", {"speed": 90}, slot=0)], out)
+                xml = (out / "riivolution" / "CustomVehicleGarage.xml").read_text()
+                self.assertIn(f'<id game="{game_id[:4]}"/>', xml)
+                names_path = out / export.MOD_FOLDER / "Scene" / "UI" / f"MenuSingle_{language}.szs"
+                names = yaz0.decompress(names_path.read_bytes())
+                self.assertEqual(bmg.read_message(u8.read_file(names, "message/Common.bmg"), 9100), "Garage")
+
     def test_numeric_stat_values_allow_over_range_and_reject_invalid_values(self):
         speed = next(bar for bar in BARS if bar.key == "speed")
         turbo = next(bar for bar in BARS if bar.key == "turbo")
@@ -229,6 +308,81 @@ class ExportTests(unittest.TestCase):
                 (targets[0] / "CustomVehicleGarage" / "Race" / "Common.szs").read_bytes(),
                 (targets[1] / "CustomVehicleGarage" / "Race" / "Common.szs").read_bytes(),
             )
+
+    def test_cancellation_during_packing_and_copy_keeps_all_old_installations(self):
+        for phase in ("Packing", "Preparing"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                cache = root / "game"
+                for archive, inner in export.KARTPARAM_ARCHIVES.items():
+                    path = cache / archive
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(fake_szs(inner))
+                targets = [root / "one", root / "two"]
+                for target in targets:
+                    old = target / export.MOD_FOLDER / "old.txt"
+                    old.parent.mkdir(parents=True)
+                    old.write_text("old mod")
+                    xml = target / "riivolution" / "CustomVehicleGarage.xml"
+                    xml.parent.mkdir()
+                    xml.write_text("old xml")
+                token = export.BuildCancellation()
+                def progress(message, fraction):
+                    if message.startswith(phase):
+                        token.cancel()
+                with self.assertRaises(export.BuildCancelled):
+                    export.install_mod(cache, "RMCE01", [Creation("Standard Kart M", {"speed": 90}, slot=1)],
+                                       targets, progress, cancel=token)
+                for target in targets:
+                    self.assertEqual((target / export.MOD_FOLDER / "old.txt").read_text(), "old mod")
+                    self.assertEqual((target / "riivolution" / "CustomVehicleGarage.xml").read_text(), "old xml")
+
+    def test_cache_reuses_unchanged_archives_and_invalidates_changed_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            game = root / "game"
+            for archive, inner in export.KARTPARAM_ARCHIVES.items():
+                path = game / archive
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(fake_szs(inner))
+            creation = Creation("Standard Kart M", {"speed": 90}, slot=1)
+            with patch.object(export, "patch_archive", wraps=export.patch_archive) as patch_archive:
+                export.build_mod(game, "RMCE01", [creation], root / "out")
+                self.assertEqual(patch_archive.call_count, 8)
+                export.build_mod(game, "RMCE01", [creation], root / "out")
+                self.assertEqual(patch_archive.call_count, 8)
+                creation.stats["speed"] = 91
+                export.build_mod(game, "RMCE01", [creation], root / "out")
+                self.assertEqual(patch_archive.call_count, 16)
+                path = game / "Race" / "Common.szs"
+                path.write_bytes(yaz0.compress(build_u8({".": {"kartParam.bin": stock_kartparam(), "new": b"data"}})))
+                export.build_mod(game, "RMCE01", [creation], root / "out")
+                self.assertEqual(patch_archive.call_count, 17)
+                patched = yaz0.decompress((root / "out" / export.MOD_FOLDER / "Race" / "Common.szs").read_bytes())
+                self.assertEqual(u8.read_file(patched, "new"), b"data")
+
+    def test_install_rolls_back_if_a_later_target_cannot_be_replaced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            targets = [root / "one", root / "two"]
+            for target in targets:
+                old = target / export.MOD_FOLDER / "old.txt"
+                old.parent.mkdir(parents=True)
+                old.write_text("old mod")
+                xml = target / "riivolution" / "CustomVehicleGarage.xml"
+                xml.parent.mkdir()
+                xml.write_text("old xml")
+            real_rename = Path.rename
+            def failing_rename(path, destination):
+                if path.parent.name.startswith(".cvg-") and path.name == export.MOD_FOLDER and destination == targets[1] / export.MOD_FOLDER:
+                    raise OSError("simulated failure")
+                return real_rename(path, destination)
+            with patch.object(Path, "rename", failing_rename):
+                with self.assertRaisesRegex(OSError, "simulated failure"):
+                    export.install_mod(root / "game", "RMCE01", [], targets)
+            for target in targets:
+                self.assertEqual((target / export.MOD_FOLDER / "old.txt").read_text(), "old mod")
+                self.assertEqual((target / "riivolution" / "CustomVehicleGarage.xml").read_text(), "old xml")
 
     def test_build_mod_rejects_slot_conflict(self):
         with tempfile.TemporaryDirectory() as tmp:

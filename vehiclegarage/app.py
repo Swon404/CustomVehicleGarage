@@ -8,25 +8,28 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from vehiclegarage import bmg, disc, dolphin, export, updater
+from vehiclegarage import bmg, disc, dolphin, export, unlock, updater
 from vehiclegarage.creations import Creation, Library, slot_conflicts
 from vehiclegarage.kartparam import KartParam
-from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir
+from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir, texture_dir
 from vehiclegarage.stats import ADVANCED_FIELDS, BARS
+from vehiclegarage.texture_browser import TextureBrowser
+from vehiclegarage.textures import TexturePack
 from vehiclegarage.vehicles import VEHICLES, WEIGHT_CLASSES
 from vehiclegarage.version import VERSION
 
 COLORS = {
-    "background": "#0b0c10",
-    "panel": "#17191f",
-    "panel_alt": "#22242b",
-    "header": "#f0eff5",
+    "background": "#07152d",
+    "panel": "#102444",
+    "panel_alt": "#1a355a",
+    "header": "#124a84",
+    "footer": "#f0eff5",
     "text": "#f7f6f8",
-    "muted": "#b2b0b8",
-    "gold": "#f0cf43",
-    "purple": "#aaa5ff",
+    "muted": "#c2d6ee",
+    "gold": "#ffda45",
+    "purple": "#53a9ff",
     "danger": "#ff7777",
-    "selected": "#3c320e",
+    "selected": "#755700",
 }
 
 
@@ -38,6 +41,11 @@ class GarageApp(tk.Tk):
         self.minsize(900, 640)
         self.configure(background=COLORS["background"])
         self._configure_styles()
+        assets = Path(__file__).resolve().parent / "assets"
+        self.app_icon = tk.PhotoImage(file=str(assets / "garage.png"))
+        self.iconphoto(True, self.app_icon)
+        self.header_icon = self.app_icon.subsample(5, 5)
+        self.header_art = tk.PhotoImage(file=str(assets / "racing-banner.png"))
         self.root_dir = root_dir or data_dir()
         self.settings = Settings.load(self.root_dir)
         self.library = Library(library_dir(self.root_dir))
@@ -45,6 +53,9 @@ class GarageApp(tk.Tk):
         self.stock: KartParam | None = None
         self.editing: Creation | None = None
         self.selected_slot: int | None = None
+        self.edit_texture: TexturePack | None = None
+        self._changing_stock_vehicle = False
+        self._build_cancel: export.BuildCancellation | None = None
         self.events: queue.Queue = queue.Queue()
 
         self._build_shell()
@@ -70,16 +81,9 @@ class GarageApp(tk.Tk):
         style.theme_use("clam")
         style.configure("App.TFrame", background=COLORS["background"])
         style.configure("Panel.TFrame", background=COLORS["panel"])
-        style.configure("Header.TFrame", background=COLORS["header"])
         style.configure("App.TLabel", background=COLORS["background"], foreground=COLORS["text"])
         style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
         style.configure("Muted.TLabel", background=COLORS["background"], foreground=COLORS["muted"])
-        style.configure(
-            "Title.TLabel",
-            background=COLORS["header"],
-            foreground="#17171d",
-            font=("Segoe UI", 17, "bold"),
-        )
         style.configure(
             "PageTitle.TLabel",
             background=COLORS["background"],
@@ -94,20 +98,26 @@ class GarageApp(tk.Tk):
         )
         style.configure(
             "Nav.TButton",
-            background="#292a31",
+            background=COLORS["panel_alt"],
             foreground=COLORS["text"],
+            bordercolor="#4c79aa",
+            lightcolor=COLORS["panel_alt"],
+            darkcolor=COLORS["panel_alt"],
             padding=(16, 10),
             font=("Segoe UI", 10, "bold"),
         )
         style.map(
             "Nav.TButton",
-            background=[("active", "#3b3c44"), ("disabled", "#22242b")],
+            background=[("active", "#285b91"), ("disabled", COLORS["panel"])],
             foreground=[("disabled", COLORS["muted"])],
         )
         style.configure(
             "NavSelected.TButton",
             background=COLORS["gold"],
             foreground="#151515",
+            bordercolor="#ffe998",
+            lightcolor=COLORS["gold"],
+            darkcolor=COLORS["gold"],
             padding=(16, 10),
             font=("Segoe UI", 10, "bold"),
         )
@@ -116,6 +126,9 @@ class GarageApp(tk.Tk):
             "Primary.TButton",
             background=COLORS["gold"],
             foreground="#171717",
+            bordercolor="#ffe998",
+            lightcolor=COLORS["gold"],
+            darkcolor=COLORS["gold"],
             padding=(16, 10),
             font=("Segoe UI", 10, "bold"),
         )
@@ -124,9 +137,12 @@ class GarageApp(tk.Tk):
             "Secondary.TButton",
             background=COLORS["panel_alt"],
             foreground=COLORS["text"],
+            bordercolor="#4c79aa",
+            lightcolor=COLORS["panel_alt"],
+            darkcolor=COLORS["panel_alt"],
             padding=(12, 8),
         )
-        style.map("Secondary.TButton", background=[("active", "#393b43")])
+        style.map("Secondary.TButton", background=[("active", "#285b91")])
         style.configure(
             "Treeview",
             background=COLORS["panel"],
@@ -166,6 +182,9 @@ class GarageApp(tk.Tk):
             fieldbackground=COLORS["panel_alt"],
             foreground=COLORS["text"],
             insertcolor=COLORS["text"],
+            bordercolor="#4c79aa",
+            lightcolor=COLORS["panel_alt"],
+            darkcolor=COLORS["panel_alt"],
         )
         style.map(
             "TEntry",
@@ -177,41 +196,93 @@ class GarageApp(tk.Tk):
             background=COLORS["panel_alt"],
             foreground=COLORS["text"],
             arrowcolor=COLORS["gold"],
+            bordercolor="#4c79aa",
+            lightcolor=COLORS["panel_alt"],
+            darkcolor=COLORS["panel_alt"],
         )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", COLORS["panel_alt"])],
+            foreground=[("readonly", COLORS["text"])],
+            selectbackground=[("readonly", COLORS["panel_alt"])],
+            selectforeground=[("readonly", COLORS["text"])],
+        )
+        self.option_add("*TCombobox*Listbox.background", COLORS["panel_alt"])
+        self.option_add("*TCombobox*Listbox.foreground", COLORS["text"])
+        self.option_add("*TCombobox*Listbox.selectBackground", COLORS["selected"])
+        self.option_add("*TCombobox*Listbox.selectForeground", COLORS["text"])
         style.configure(
             "TCheckbutton",
             background=COLORS["panel"],
             foreground=COLORS["text"],
+            indicatorcolor=COLORS["panel_alt"],
         )
-        style.map("TCheckbutton", background=[("active", COLORS["panel"])])
+        style.map(
+            "TCheckbutton",
+            background=[("active", COLORS["panel"])],
+            indicatorcolor=[("selected", COLORS["gold"]), ("!selected", COLORS["panel_alt"])],
+        )
         style.configure(
             "TRadiobutton",
             background=COLORS["panel"],
             foreground=COLORS["text"],
+            indicatorcolor=COLORS["panel_alt"],
         )
-        style.map("TRadiobutton", background=[("active", COLORS["panel"])])
+        style.map(
+            "TRadiobutton",
+            background=[("active", COLORS["panel"])],
+            indicatorcolor=[("selected", COLORS["gold"]), ("!selected", COLORS["panel_alt"])],
+        )
+        style.configure(
+            "Horizontal.TScale",
+            background=COLORS["gold"],
+            troughcolor="#28466e",
+            bordercolor="#28466e",
+            lightcolor=COLORS["gold"],
+            darkcolor=COLORS["gold"],
+        )
+        style.map("Horizontal.TScale", background=[("active", "#ffe989")])
+        style.configure(
+            "Horizontal.TProgressbar",
+            background=COLORS["gold"],
+            troughcolor="#28466e",
+            bordercolor="#28466e",
+            lightcolor=COLORS["gold"],
+            darkcolor=COLORS["gold"],
+        )
+        style.configure(
+            "Vertical.TScrollbar",
+            background=COLORS["panel_alt"],
+            troughcolor=COLORS["background"],
+            bordercolor="#4c79aa",
+            arrowcolor=COLORS["gold"],
+            lightcolor=COLORS["panel_alt"],
+            darkcolor=COLORS["panel_alt"],
+        )
+        style.map("Vertical.TScrollbar", background=[("active", "#285b91")])
 
     def _build_shell(self) -> None:
-        header = ttk.Frame(self, style="Header.TFrame", padding=(20, 12))
-        header.pack(fill="x")
-        title_area = ttk.Frame(header, style="Header.TFrame")
-        title_area.pack(side="left", fill="x", expand=True)
-        ttk.Label(title_area, text="CUSTOM VEHICLE GARAGE", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(
-            title_area,
-            text="Build your ride. Choose its stock vehicle. Install it to Dolphin.",
-            background=COLORS["header"],
-            foreground="#55545d",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 0))
-        self.game_status = ttk.Label(
-            header,
+        self.header = tk.Canvas(
+            self, height=self.header_art.height(), background=COLORS["header"], highlightthickness=0
+        )
+        self.header.pack(fill="x")
+        self.header.create_image(20, 45, image=self.header_icon, anchor="w")
+        self.header.create_text(
+            84, 31, text="CUSTOM VEHICLE GARAGE", anchor="w",
+            fill=COLORS["text"], font=("Segoe UI", 17, "bold"),
+        )
+        self.header.create_text(
+            84, 58, text="Build your ride. Choose its stock vehicle. Install it to Dolphin.",
+            anchor="w", fill=COLORS["muted"], font=("Segoe UI", 9),
+        )
+        self.game_status = self.header.create_text(
+            0, 45,
             text="GAME DATA NOT IMPORTED",
-            background=COLORS["header"],
-            foreground="#55545d",
+            anchor="e",
+            fill=COLORS["muted"],
             font=("Segoe UI", 9, "bold"),
         )
-        self.game_status.pack(side="right", padx=(12, 0))
+        self.header.bind("<Configure>", self._resize_header)
         tk.Frame(self, height=3, background=COLORS["purple"]).pack(fill="x")
 
         nav = ttk.Frame(self, style="App.TFrame", padding=(14, 10, 14, 8))
@@ -244,19 +315,26 @@ class GarageApp(tk.Tk):
         self.page_host.pack(fill="both", expand=True)
         self.pages: dict[str, ttk.Frame] = {}
 
-        footer = tk.Frame(self, height=24, background=COLORS["header"])
+        footer = tk.Frame(self, height=24, background=COLORS["footer"])
         footer.pack(fill="x", side="bottom")
         tk.Frame(footer, height=3, background=COLORS["purple"]).pack(fill="x")
         tk.Label(
             footer,
             text="CUSTOM VEHICLE GARAGE",
-            background=COLORS["header"],
+            background=COLORS["footer"],
             foreground="#55545d",
             font=("Segoe UI", 8, "bold"),
             anchor="e",
             padx=14,
             pady=2,
         ).pack(fill="x")
+
+    def _resize_header(self, event: tk.Event) -> None:
+        self.header.delete("background")
+        for x in range(0, event.width, self.header_art.width()):
+            self.header.create_image(x, 0, image=self.header_art, anchor="nw", tags="background")
+        self.header.tag_lower("background")
+        self.header.coords(self.game_status, event.width - 20, 45)
 
     def _new_page(self, key: str) -> ttk.Frame:
         page = ttk.Frame(self.page_host, style="App.TFrame", padding=8)
@@ -479,10 +557,12 @@ class GarageApp(tk.Tk):
     def _edit_selected(self) -> None:
         creation = self._selected_creation()
         if creation and self._require_stock():
+            self._changing_stock_vehicle = False
             self._start_editing(creation)
 
     def _new_creation(self) -> None:
         if self._require_stock():
+            self._changing_stock_vehicle = False
             self.editing = None
             self.selected_slot = None
             self.vehicle_class_filter.set("All")
@@ -654,7 +734,30 @@ class GarageApp(tk.Tk):
 
     def _build_editor_page(self) -> None:
         page = self._new_page("editor")
-        heading = ttk.Frame(page, style="App.TFrame")
+        actions = ttk.Frame(page, style="App.TFrame")
+        actions.pack(side="bottom", fill="x", pady=(10, 0))
+        ttk.Button(actions, text="< BACK TO GARAGE", style="Secondary.TButton", command=self._cancel_editing).pack(side="left")
+        ttk.Button(actions, text="RESET STATS", style="Secondary.TButton", command=self._reset_to_stock).pack(side="left", padx=8)
+        ttk.Button(actions, text="SAVE VEHICLE", style="Primary.TButton", command=self._save_creation).pack(side="right")
+
+        scroll_area = ttk.Frame(page, style="App.TFrame")
+        scroll_area.pack(fill="both", expand=True)
+        self.editor_canvas = tk.Canvas(scroll_area, background=COLORS["background"], highlightthickness=0)
+        self.editor_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(scroll_area, orient="vertical", command=self.editor_canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.editor_canvas.configure(yscrollcommand=scrollbar.set)
+        content = ttk.Frame(self.editor_canvas, style="App.TFrame")
+        content_window = self.editor_canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _event: self.editor_canvas.configure(scrollregion=self.editor_canvas.bbox("all")),
+        )
+        self.editor_canvas.bind(
+            "<Configure>",
+            lambda event: self.editor_canvas.itemconfigure(content_window, width=event.width),
+        )
+        heading = ttk.Frame(content, style="App.TFrame")
         heading.pack(fill="x", pady=(2, 12))
         ttk.Label(heading, text="TUNE YOUR VEHICLE", style="PageTitle.TLabel").pack(anchor="w")
         ttk.Label(
@@ -663,7 +766,7 @@ class GarageApp(tk.Tk):
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(3, 0))
 
-        identity = ttk.Frame(page, style="Panel.TFrame", padding=12)
+        identity = ttk.Frame(content, style="Panel.TFrame", padding=12)
         identity.pack(fill="x")
         identity_left = ttk.Frame(identity, style="Panel.TFrame")
         identity_left.pack(side="left", fill="x", expand=True)
@@ -683,6 +786,12 @@ class GarageApp(tk.Tk):
         self.name_counter = ttk.Label(name_row, text=f"0 / {bmg.MAX_VEHICLE_NAME_CODE_UNITS}", style="Panel.TLabel")
         self.name_counter.pack(side="left", padx=8)
         self.name_var.trace_add("write", lambda *_: self._update_name_counter())
+        texture_row = ttk.Frame(identity_left, style="Panel.TFrame")
+        texture_row.pack(anchor="w", pady=(8, 0))
+        ttk.Button(texture_row, text="BROWSE TEXTURES", style="Secondary.TButton", command=self._browse_textures).pack(side="left")
+        ttk.Button(texture_row, text="CLEAR", style="Secondary.TButton", command=self._clear_texture).pack(side="left", padx=6)
+        self.texture_label = ttk.Label(identity_left, text="Texture: stock appearance", style="Panel.TLabel", wraplength=410)
+        self.texture_label.pack(anchor="w", pady=(4, 0))
 
         identity_right = ttk.Frame(identity, style="Panel.TFrame")
         identity_right.pack(side="right", padx=(16, 0))
@@ -703,7 +812,7 @@ class GarageApp(tk.Tk):
         ).pack(anchor="e", pady=(8, 0))
 
         bars = ttk.LabelFrame(
-            page,
+            content,
             text="  PERFORMANCE STATS  ",
             padding=10,
             style="Panel.TLabelframe",
@@ -747,7 +856,7 @@ class GarageApp(tk.Tk):
             ).grid(row=row, column=4, sticky="w", padx=8)
         bars.columnconfigure(1, weight=1)
         ttk.Label(
-            page,
+            content,
             text=(
                 "The slider is the normal range; type an exact value to go beyond it. "
                 "Use the stock value as a reference when setting 2x, 3x, or 4x."
@@ -758,13 +867,13 @@ class GarageApp(tk.Tk):
 
         self.advanced_open = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            page,
+            content,
             text="SHOW ADVANCED GAME VALUES",
             variable=self.advanced_open,
             command=self._toggle_advanced,
         ).pack(anchor="w")
         self.advanced_frame = ttk.LabelFrame(
-            page,
+            content,
             text="  ADVANCED STATS  ",
             padding=8,
             style="Panel.TLabelframe",
@@ -787,12 +896,6 @@ class GarageApp(tk.Tk):
                 pady=2,
             )
 
-        actions = ttk.Frame(page, style="App.TFrame")
-        actions.pack(side="bottom", fill="x", pady=(10, 0))
-        ttk.Button(actions, text="< BACK TO GARAGE", style="Secondary.TButton", command=self._cancel_editing).pack(side="left")
-        ttk.Button(actions, text="RESET STATS", style="Secondary.TButton", command=self._reset_to_stock).pack(side="left", padx=8)
-        ttk.Button(actions, text="SAVE VEHICLE", style="Primary.TButton", command=self._save_creation).pack(side="right")
-
     def _toggle_advanced(self) -> None:
         if self.advanced_open.get():
             self.advanced_frame.pack(fill="x", pady=6)
@@ -804,13 +907,40 @@ class GarageApp(tk.Tk):
         self.name_counter.config(text=f"{units} / {bmg.MAX_VEHICLE_NAME_CODE_UNITS}")
 
     def _change_stock_vehicle(self) -> None:
+        self._changing_stock_vehicle = True
         self._fill_vehicles(select_slot=self.selected_slot)
         self.show_page("vehicles")
 
     def _cancel_editing(self) -> None:
         self.editing = None
+        self._changing_stock_vehicle = False
         self._refresh_garage()
         self.show_page("garage")
+
+    def _browse_textures(self) -> None:
+        slot = self._current_slot()
+        if slot is not None:
+            TextureBrowser(self, slot, self._apply_texture)
+
+    def _apply_texture(self, pack: TexturePack) -> None:
+        if pack.slot != self._current_slot():
+            messagebox.showwarning("Vehicle changed", "Choose a texture for the current vehicle.")
+            return
+        self.edit_texture = pack
+        self._refresh_texture_label()
+
+    def _clear_texture(self) -> None:
+        self.edit_texture = None
+        self._refresh_texture_label()
+
+    def _refresh_texture_label(self) -> None:
+        if self.edit_texture:
+            self.texture_label.config(
+                text=f"Texture: {self.edit_texture.name} ({len(self.edit_texture.files)} race files). "
+                     "The in-game selection preview remains stock."
+            )
+        else:
+            self.texture_label.config(text="Texture: stock appearance")
 
     def _current_slot(self) -> int | None:
         return self.selected_slot
@@ -868,6 +998,13 @@ class GarageApp(tk.Tk):
         self.editing = creation
         if slot is None:
             slot = creation.slot if creation else (self.selected_slot if self.selected_slot is not None else 0)
+        if self._changing_stock_vehicle:
+            if self.edit_texture and self.edit_texture.slot != slot:
+                self.edit_texture = None
+                messagebox.showinfo("Texture cleared", "The texture was for the previous vehicle. Choose a compatible texture for this one.")
+        else:
+            self.edit_texture = creation.texture if creation and creation.slot == slot else None
+        self._changing_stock_vehicle = False
         self.selected_slot = slot
         self._fill_vehicles(select_slot=slot)
         self.name_var.set(creation.name if creation else "")
@@ -875,6 +1012,7 @@ class GarageApp(tk.Tk):
         self.number_label.config(text=f"#{creation.number}" if creation else f"#{self.library.next_number()} (new)")
         overrides = creation.stats if creation and creation.slot == slot else {}
         self._load_values(slot, overrides)
+        self._refresh_texture_label()
         self.show_page("editor")
 
     def _reset_to_stock(self) -> None:
@@ -922,7 +1060,7 @@ class GarageApp(tk.Tk):
             messagebox.showwarning("Check the stats", str(err))
             return
         number = self.editing.number if self.editing else 0
-        creation = Creation(name=name, stats=stats, slot=slot, number=number, enabled=self.editing.enabled if self.editing else True)
+        creation = Creation(name=name, stats=stats, slot=slot, number=number, enabled=self.editing.enabled if self.editing else True, texture=self.edit_texture)
         others = [c for c in self.library.all() if c.slot == slot and c.number != number and c.enabled]
         if others and creation.enabled:
             names = ", ".join(f"#{c.number} {c.name}" for c in others)
@@ -967,17 +1105,15 @@ class GarageApp(tk.Tk):
             text="Dolphin Riivolution folder",
             variable=self.use_riivolution,
         ).grid(row=0, column=0, sticky="w")
-        ttk.Label(box, text=str(self.folders.riivolution), style="Panel.TLabel").grid(
-            row=0, column=1, sticky="w", padx=10
-        )
+        self.riivolution_path_label = ttk.Label(box, text=str(self.folders.riivolution), style="Panel.TLabel")
+        self.riivolution_path_label.grid(row=0, column=1, sticky="w", padx=10)
         ttk.Checkbutton(
             box,
             text="Dolphin SD card sync folder",
             variable=self.use_sd_sync,
         ).grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(box, text=str(self.folders.sd_sync), style="Panel.TLabel").grid(
-            row=1, column=1, sticky="w", padx=10, pady=(8, 0)
-        )
+        self.sd_sync_path_label = ttk.Label(box, text=str(self.folders.sd_sync), style="Panel.TLabel")
+        self.sd_sync_path_label.grid(row=1, column=1, sticky="w", padx=10, pady=(8, 0))
         ttk.Checkbutton(
             box,
             text="Other folder / real Wii SD card",
@@ -1014,8 +1150,27 @@ class GarageApp(tk.Tk):
             command=self._build_mod,
         )
         self.build_button.pack(side="left")
+        self.play_button = ttk.Button(
+            actions,
+            text="BUILD & PLAY IN DOLPHIN",
+            style="Secondary.TButton",
+            command=lambda: self._build_mod(play=True),
+        )
+        self.play_button.pack(side="left", padx=(8, 0))
+        self.cancel_build_button = ttk.Button(
+            actions, text="CANCEL BUILD", style="Secondary.TButton", command=self._cancel_build
+        )
+        self.cancel_build_button.pack(side="left", padx=(8, 0))
+        self.cancel_build_button.state(["disabled"])
         self.progress = ttk.Progressbar(actions, maximum=100, length=420)
         self.progress.pack(side="left", fill="x", expand=True, padx=14)
+        self.unlock_button = ttk.Button(
+            page,
+            text="SET UP CHARACTER & VEHICLE UNLOCK",
+            style="Secondary.TButton",
+            command=self._setup_unlock,
+        )
+        self.unlock_button.pack(anchor="w", pady=(8, 0))
         self.install_status = ttk.Label(
             page,
             text="",
@@ -1030,10 +1185,68 @@ class GarageApp(tk.Tk):
             wraplength=900,
             style="Muted.TLabel",
             text=(
-                "In Dolphin, right-click Mario Kart Wii and choose 'Start with Riivolution Patches'. "
-                "Enable Custom Vehicle Garage and leave the SD Root as Dolphin shows it."
+                "Build & Play installs to Dolphin's Riivolution folder and starts the game with the mod enabled. "
+                "Alternatively, right-click the game in Dolphin and choose 'Start with Riivolution Patches'."
             ),
         ).pack(anchor="w", pady=(16, 0))
+
+    def _setup_unlock(self) -> None:
+        if not self._require_stock():
+            return
+        game = self.settings.game_id
+        tool = Path(self.settings.dolphintool) if self.settings.dolphintool else None
+        image = Path(self.settings.disc) if self.settings.disc else None
+        exe = tool.with_name("Dolphin.exe") if tool else None
+        if tool is None or not tool.is_file() or image is None or not image.is_file() or exe is None or not exe.is_file():
+            messagebox.showwarning("Dolphin setup", "Choose a valid game image and DolphinTool.exe on the Setup page.")
+            return
+        try:
+            disc.validate_game_id(game)
+        except ValueError as err:
+            messagebox.showerror("Unsupported game", str(err))
+            return
+        folders = dolphin.find_folders(exe)
+        if not messagebox.askyesno(
+            "Set up License Unlock",
+            f"Close Dolphin and back up your Mario Kart Wii save first.\n\n"
+            f"This adds Wiimm's region-specific Gecko code to Dolphin for {game} and enables cheats "
+            "for this game. Other enabled cheats for this game may also run.\n\n"
+            "Activating the code in-game and saving makes the unlock permanent. "
+            "The code unlocks one licence's characters, vehicles and courses, not trophies.\n\n"
+            f"Dolphin user folder: {folders.user_dir}\n\nContinue?",
+        ):
+            return
+        self.unlock_button.state(["disabled"])
+        self.install_status.config(text="Setting up License Unlock...")
+
+        def work():
+            actual_game = disc.read_game_id(tool, image)
+            if actual_game != game:
+                raise ValueError(f"The selected image is {actual_game}, but the imported data is {game}. Re-import the game.")
+            code = unlock.fetch_code(game)
+            return unlock.install(folders.user_dir, game, code)
+
+        def done(result, error):
+            self.unlock_button.state(["!disabled"])
+            if error:
+                self.install_status.config(text=f"License Unlock setup failed: {error}")
+                messagebox.showerror("License Unlock setup failed", str(error))
+                return
+            target, backup = result
+            self.install_status.config(text=f"License Unlock configured for {game}.")
+            backup_text = f"\n\nPrevious game settings backup: {backup}" if backup else ""
+            messagebox.showinfo(
+                "License Unlock ready",
+                f"Configured {target}.{backup_text}\n\n"
+                "In Dolphin, start the game. At the licence selection screen, hold PLUS, MINUS, 1 and B "
+                "on controller 1, then press the D-pad direction of the licence you want. "
+                "The code's original instructions describe a Wii Remote rotated 45 degrees counterclockwise.\n\n"
+                "A sound speed-up indicates success. Complete a race or change a Mii to save permanently. "
+                "Trophies are not changed.\n\n"
+                f"Instructions: {unlock.SOURCE}",
+            )
+
+        self._run_in_background(work, done)
 
     def _browse_dir(self, var: tk.StringVar) -> None:
         chosen = filedialog.askdirectory(initialdir=var.get() or None)
@@ -1059,7 +1272,14 @@ class GarageApp(tk.Tk):
             targets.append(Path(self.custom_var.get().strip()))
         return targets
 
-    def _build_mod(self) -> None:
+    def _cancel_build(self) -> None:
+        if self._build_cancel and self._build_cancel.cancel():
+            self.cancel_build_button.state(["disabled"])
+            self.install_status.config(text="Cancelling build...")
+        else:
+            self.install_status.config(text="Finishing installation; it can no longer be cancelled.")
+
+    def _build_mod(self, play: bool = False) -> None:
         if not self._require_stock():
             return
         creations = self.library.all()
@@ -1067,6 +1287,8 @@ class GarageApp(tk.Tk):
             messagebox.showwarning("Conflict", "Two included creations replace the same vehicle. Fix that in My Garage first.")
             return
         targets = self._install_targets()
+        if play and self.folders.riivolution not in targets:
+            targets.insert(0, self.folders.riivolution)
         if not targets:
             messagebox.showwarning("Choose a folder", "Tick at least one place to install the mod.")
             return
@@ -1077,23 +1299,61 @@ class GarageApp(tk.Tk):
         self.settings.save(self.root_dir)
 
         game = self.settings.game_id
+        image = Path(self.settings.disc) if self.settings.disc else None
+        tool = Path(self.settings.dolphintool) if self.settings.dolphintool else None
+        exe = tool.with_name("Dolphin.exe") if tool else None
+        if play and (image is None or not image.is_file() or tool is None or not tool.is_file()
+                     or exe is None or not exe.is_file()):
+            messagebox.showwarning(
+                "Dolphin setup",
+                "Choose a valid game image and DolphinTool.exe on the Setup page. "
+                "Dolphin.exe must be in the same folder as DolphinTool.exe.",
+            )
+            return
         self.build_button.state(["disabled"])
+        self.play_button.state(["disabled"])
+        self.cancel_build_button.state(["!disabled"])
+        cancel = export.BuildCancellation()
+        self._build_cancel = cancel
         self.install_status.config(text="Building...")
 
         def progress(message: str, fraction: float) -> None:
-            self.events.put(lambda: (self.progress.config(value=fraction * 100), self.install_status.config(text=message)))
+            def update():
+                self.progress.config(value=fraction * 100)
+                self.install_status.config(text=message)
+                if message.startswith("Finishing installation"):
+                    self.cancel_build_button.state(["disabled"])
+            self.events.put(update)
 
         def work():
-            return export.install_mod(self.cache / game, game, creations, targets, progress)
+            cancel.check()
+            if play:
+                imported_game = disc.read_game_id(tool, image)
+                if imported_game != game:
+                    raise ValueError(
+                        f"The selected game image is {imported_game}, but the imported data is {game}. "
+                        "Re-import the game on the Setup page."
+                    )
+            result = export.install_mod(self.cache / game, game, creations, targets, progress, texture_dir(self.root_dir), cancel)
+            if play:
+                dolphin.launch_mod(exe, image, game, self.folders.riivolution, self.root_dir / "dolphin-launch.json")
+            return result
 
         def done(result, error):
+            self._build_cancel = None
             self.build_button.state(["!disabled"])
-            if error:
+            self.play_button.state(["!disabled"])
+            self.cancel_build_button.state(["disabled"])
+            if isinstance(error, export.BuildCancelled):
+                self.progress.config(value=0)
+                self.install_status.config(text="Build cancelled. Existing installations were not changed.")
+            elif error:
                 self.install_status.config(text=f"Failed: {error}")
-                messagebox.showerror("Build failed", str(error))
+                messagebox.showerror("Build or launch failed" if play else "Build failed", str(error))
             else:
                 self.progress.config(value=100)
-                self.install_status.config(text="Done. Installed into:\n" + "\n".join(str(p) for p in result))
+                prefix = "Launched Dolphin. Installed into:\n" if play else "Done. Installed into:\n"
+                self.install_status.config(text=prefix + "\n".join(str(p) for p in result))
 
         self._run_in_background(work, done)
 
@@ -1182,15 +1442,17 @@ class GarageApp(tk.Tk):
     def _refresh_setup(self) -> None:
         if self.stock is not None:
             self.setup_status.config(text=f"Game data ready ({self.settings.game_id}). You can create vehicles now.")
-            self.game_status.configure(
+            self.header.itemconfigure(
+                self.game_status,
                 text=f"GAME DATA READY  |  {self.settings.game_id}",
-                foreground="#275e42",
+                fill="#a7f5c2",
             )
         else:
             self.setup_status.config(text="No game data yet. Choose your game image and DolphinTool.exe, then import.")
-            self.game_status.configure(
+            self.header.itemconfigure(
+                self.game_status,
                 text="SETUP REQUIRED",
-                foreground="#8c3a37",
+                fill="#ffe08a",
             )
 
     def _import_game(self) -> None:
@@ -1214,6 +1476,9 @@ class GarageApp(tk.Tk):
             self.settings.dolphintool = str(tool)
             self.settings.game_id = game_id
             self.settings.save(self.root_dir)
+            self.folders = dolphin.find_folders(tool.with_name("Dolphin.exe"))
+            self.riivolution_path_label.config(text=str(self.folders.riivolution))
+            self.sd_sync_path_label.config(text=str(self.folders.sd_sync))
             self._load_stock()
             self._refresh_setup()
             self._refresh_garage()

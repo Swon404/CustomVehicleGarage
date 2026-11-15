@@ -6,7 +6,7 @@ from pathlib import Path
 
 from vehiclegarage import disc, export
 from vehiclegarage.creations import Library
-from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir
+from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir, texture_dir
 
 
 def build(args: argparse.Namespace) -> int:
@@ -20,7 +20,7 @@ def build(args: argparse.Namespace) -> int:
         print("error: import a game first with --disc", file=sys.stderr)
         return 1
     creations = Library(library_dir(root)).all()
-    out = export.build_mod(cache_dir(root) / settings.game_id, settings.game_id, creations, Path(args.out))
+    out = export.build_mod(cache_dir(root) / settings.game_id, settings.game_id, creations, Path(args.out), texture_dir=texture_dir(root))
     print(f"wrote mod to {out}")
     return 0
 
