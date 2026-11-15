@@ -45,6 +45,7 @@ class Settings:
     install_custom: bool = False
     game_id: str = ""
     recent_folders: dict[str, str] = field(default_factory=dict)
+    build_collection: str = ""
 
     def picker_folder(self, key: str, existing: str = "", is_file: bool = False) -> Path:
         remembered = self.recent_folders.get(key)

@@ -46,7 +46,8 @@ class DolphinFolderTests(unittest.TestCase):
             archive.touch()
             preset = root / "app" / "dolphin-launch.json"
 
-            with patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
+            with patch("vehiclegarage.dolphin.is_running", return_value=False), \
+                    patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
                 dolphin.launch_mod(exe, image, "RMCE01", sd_root, preset)
 
             data = json.loads(preset.read_text(encoding="utf-8"))
@@ -76,7 +77,8 @@ class DolphinFolderTests(unittest.TestCase):
             archive.parent.mkdir(parents=True)
             archive.touch()
             preset = root / "preset.json"
-            with patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
+            with patch("vehiclegarage.dolphin.is_running", return_value=False), \
+                    patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
                 with self.assertRaisesRegex(ValueError, "missing or invalid"):
                     dolphin.launch_mod(exe, image, "RMCE01", sd_root, preset)
                 with self.assertRaisesRegex(ValueError, "does not match"):
@@ -99,13 +101,47 @@ class DolphinFolderTests(unittest.TestCase):
             output = root / "output"
             export.build_mod(game, "RMCJ01", [Creation("Garage", slot=0)], output)
             self.assertFalse((output / export.MOD_FOLDER / "Race" / "Common.szs").exists())
-            with patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
+            with patch("vehiclegarage.dolphin.is_running", return_value=False), \
+                    patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
                 dolphin.launch_mod(exe, image, "RMCJ01", output, root / "preset.json")
                 missing = output / export.MOD_FOLDER / disc.localized_message_archives("RMCJ01")[0]
                 missing.unlink()
                 with self.assertRaisesRegex(ValueError, "missing or invalid"):
                     dolphin.launch_mod(exe, image, "RMCJ01", output, root / "preset.json")
             popen.assert_called_once()
+
+    def test_running_dolphin_is_rechecked_before_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe = root / "Dolphin.exe"
+            image = root / "game.rvz"
+            exe.touch()
+            image.touch()
+            (root / export.MOD_FOLDER).mkdir()
+            xml = root / "riivolution" / "CustomVehicleGarage.xml"
+            xml.parent.mkdir()
+            xml.write_text(export.riivolution_xml("RMCE01", []), encoding="utf-8")
+            with patch("vehiclegarage.dolphin.is_running", return_value=True), \
+                    patch("vehiclegarage.dolphin.subprocess.Popen") as popen:
+                with self.assertRaisesRegex(ValueError, "Dolphin is running"):
+                    dolphin.launch_mod(exe, image, "RMCE01", root, root / "preset.json")
+            popen.assert_not_called()
+            self.assertFalse((root / "preset.json").exists())
+
+    def test_close_prompt_rechecks_until_dolphin_exits(self):
+        app = SimpleNamespace(_dolphin_close_prompt=Mock(side_effect=[True, True]))
+        with patch("vehiclegarage.app.dolphin.is_running", side_effect=[True, True, False]):
+            self.assertTrue(GarageApp._ensure_dolphin_closed(app))
+        self.assertEqual(app._dolphin_close_prompt.call_count, 2)
+
+    def test_close_prompt_cancel_and_detection_failure_stop_build(self):
+        app = SimpleNamespace(_dolphin_close_prompt=Mock(return_value=False))
+        with patch("vehiclegarage.app.dolphin.is_running", return_value=True):
+            self.assertFalse(GarageApp._ensure_dolphin_closed(app))
+        with patch("vehiclegarage.app.dolphin.is_running", side_effect=OSError("process error")), \
+                patch("vehiclegarage.app.messagebox.showerror") as warning:
+            self.assertFalse(GarageApp._ensure_dolphin_closed(app))
+        warning.assert_called_once()
 
     def test_build_and_play_installs_current_mod_to_dolphin_before_launch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -138,6 +174,8 @@ class DolphinFolderTests(unittest.TestCase):
                 progress=Mock(),
                 events=queue.Queue(),
                 _run_in_background=lambda work, done: done(work(), None),
+                _ensure_dolphin_closed=lambda: True,
+                build_collection=Mock(get=Mock(return_value="garage")),
             )
             with patch("vehiclegarage.app.disc.read_game_id", return_value="RMCE01"), \
                     patch("vehiclegarage.app.export.install_mod", return_value=[sd_root]) as install, \
@@ -160,6 +198,8 @@ class DolphinFolderTests(unittest.TestCase):
                 use_custom=Mock(get=Mock(return_value=False)), custom_var=Mock(get=Mock(return_value="")),
                 root_dir=root, cache=root / "cache", build_button=Mock(), play_button=Mock(),
                 cancel_build_button=Mock(), install_status=Mock(), progress=Mock(), events=queue.Queue(),
+                _ensure_dolphin_closed=lambda: True,
+                build_collection=Mock(get=Mock(return_value="garage")),
             )
             def run(work, done):
                 try:

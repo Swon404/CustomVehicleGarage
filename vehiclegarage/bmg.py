@@ -5,15 +5,14 @@ from collections.abc import Mapping
 
 VEHICLE_COUNT = 36
 HEADER_SIZE = 0x20
-MAX_VEHICLE_NAME_CODE_UNITS = 10
-
-
-def vehicle_name_fits_ui_limit(name: str) -> bool:
+def valid_vehicle_name(name: str) -> bool:
+    if not name or any(ord(char) < 0x20 for char in name):
+        return False
     try:
-        code_units = len(name.encode("utf-16-be")) // 2
+        name.encode("utf-16-be")
     except UnicodeEncodeError:
         return False
-    return code_units <= MAX_VEHICLE_NAME_CODE_UNITS
+    return True
 
 
 def vehicle_name_message_ids(slot: int) -> tuple[int, ...]:
@@ -95,6 +94,24 @@ def read_message(data: bytes, message_id: int) -> str:
         return data[start:end].decode("utf-16-be")
     except UnicodeDecodeError as err:
         raise ValueError(f"BMG message {message_id} is not valid UTF-16BE") from err
+
+
+def vehicle_name_capacities(data: bytes) -> list[int]:
+    offsets_by_id, pool_offsets, _pool_start, pool_size = _layout(data)
+    limits = {
+        offset: pool_offsets[index + 1] if index + 1 < len(pool_offsets) else pool_size
+        for index, offset in enumerate(pool_offsets)
+    }
+    capacities = []
+    for slot in range(VEHICLE_COUNT):
+        sizes = []
+        for message_id in vehicle_name_message_ids(slot):
+            if message_id not in offsets_by_id:
+                raise ValueError(f"BMG does not contain vehicle-name message {message_id}")
+            offset = offsets_by_id[message_id]
+            sizes.append(max(0, (limits[offset] - offset) // 2 - 1))
+        capacities.append(min(sizes))
+    return capacities
 
 
 def replace_messages(data: bytes, replacements: Mapping[int, str]) -> bytes:

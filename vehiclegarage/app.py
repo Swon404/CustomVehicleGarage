@@ -12,7 +12,7 @@ import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from vehiclegarage import bmg, disc, dolphin, export, unlock, updater
+from vehiclegarage import bmg, disc, dolphin, export, presets, updater
 from vehiclegarage.creations import Creation, Library, slot_conflicts
 from vehiclegarage.kartparam import KartParam
 from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir, texture_dir
@@ -71,14 +71,17 @@ class ToolTip:
 class GarageApp(tk.Tk):
     def __init__(self, root_dir: Path | None = None):
         super().__init__()
-        self.title("Custom Vehicle Garage")
+        self.title("Custom Vehicle Garage - Mario Kart Wii")
         self.geometry("1100x760")
         self.minsize(900, 640)
         self.configure(background=COLORS["background"])
         self._configure_styles()
         assets = Path(__file__).resolve().parent / "assets"
         self.app_icon = tk.PhotoImage(file=str(assets / "garage.png"))
-        self.iconphoto(True, self.app_icon)
+        if os.name == "nt":
+            self.iconbitmap(default=str(assets / "garage.ico"))
+        else:
+            self.iconphoto(True, self.app_icon)
         self.header_icon = self.app_icon.subsample(5, 5)
         self.header_art = tk.PhotoImage(file=str(assets / "racing-banner.png"))
         self.root_dir = root_dir or data_dir()
@@ -87,6 +90,7 @@ class GarageApp(tk.Tk):
         self.cache = cache_dir(self.root_dir)
         self.stock: KartParam | None = None
         self.editing: Creation | None = None
+        self._preset_edit_slot: int | None = None
         self.selected_slot: int | None = None
         self.edit_texture: TexturePack | None = None
         self._changing_stock_vehicle = False
@@ -308,7 +312,7 @@ class GarageApp(tk.Tk):
             fill=COLORS["text"], font=("Segoe UI", 17, "bold"),
         )
         self.header.create_text(
-            84, 58, text="Build your ride. Choose its stock vehicle. Install it to Dolphin.",
+            84, 58, text="Mario Kart Wii | Build your ride and install it to Dolphin.",
             anchor="w", fill=COLORS["muted"], font=("Segoe UI", 9),
         )
         self.game_status = self.header.create_text(
@@ -361,7 +365,7 @@ class GarageApp(tk.Tk):
         self.update_status.pack(side="left")
         tk.Label(
             footer,
-            text="CUSTOM VEHICLE GARAGE",
+            text="Created by Swon404 and OnnY",
             background=COLORS["footer"],
             foreground="#55545d",
             font=("Segoe UI", 8, "bold"),
@@ -774,11 +778,11 @@ class GarageApp(tk.Tk):
                 padx=8,
                 pady=9,
                 justify="left",
-                anchor="w",
+                anchor="nw",
                 font=("Segoe UI", 10, "bold"),
                 cursor="hand2",
             )
-            button.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
+            button.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
             self.visible_slots.append(vehicle.slot)
             self.vehicle_buttons[vehicle.slot] = button
 
@@ -819,7 +823,8 @@ class GarageApp(tk.Tk):
         page = self._new_page("editor")
         actions = ttk.Frame(page, style="App.TFrame")
         actions.pack(side="bottom", fill="x", pady=(10, 0))
-        ttk.Button(actions, text="< BACK TO GARAGE", style="Secondary.TButton", command=self._cancel_editing).pack(side="left")
+        self.editor_back_button = ttk.Button(actions, text="< BACK TO GARAGE", style="Secondary.TButton", command=self._cancel_editing)
+        self.editor_back_button.pack(side="left")
         ttk.Button(actions, text="RESET STATS", style="Secondary.TButton", command=self._reset_to_stock).pack(side="left", padx=8)
         self.save_vehicle_button = ttk.Button(actions, text="SAVE VEHICLE", style="Primary.TButton", command=self._save_creation)
         self.save_vehicle_button.pack(side="right")
@@ -859,21 +864,23 @@ class GarageApp(tk.Tk):
         name_row = ttk.Frame(identity_left, style="Panel.TFrame")
         name_row.pack(anchor="w", pady=(4, 0))
         self.name_var = tk.StringVar()
-        name_validation = self.register(bmg.vehicle_name_fits_ui_limit)
         self.name_entry = ttk.Entry(
             name_row,
             textvariable=self.name_var,
             width=28,
-            validate="key",
-            validatecommand=(name_validation, "%P"),
         )
         self.name_entry.pack(side="left")
-        self.name_counter = ttk.Label(name_row, text=f"0 / {bmg.MAX_VEHICLE_NAME_CODE_UNITS}", style="Panel.TLabel")
+        self.name_counter = ttk.Label(name_row, text="0 UTF-16 units", style="Panel.TLabel")
         self.name_counter.pack(side="left", padx=8)
+        ttk.Label(
+            identity_left, text="Available name space is checked when building; long names may be clipped in-game.",
+            style="Panel.TLabel", wraplength=410,
+        ).pack(anchor="w", pady=(4, 0))
         self.name_var.trace_add("write", lambda *_: self._update_name_counter())
         texture_row = ttk.Frame(identity_left, style="Panel.TFrame")
         texture_row.pack(anchor="w", pady=(8, 0))
-        ttk.Button(texture_row, text="BROWSE TEXTURES", style="Secondary.TButton", command=self._browse_textures).pack(side="left")
+        self.browse_texture_button = ttk.Button(texture_row, text="BROWSE TEXTURES", style="Secondary.TButton", command=self._browse_textures)
+        self.browse_texture_button.pack(side="left")
         self.clear_texture_button = ttk.Button(texture_row, text="CLEAR", style="Secondary.TButton", command=self._clear_texture)
         self.clear_texture_button.pack(side="left", padx=6)
         self.texture_source_button = ttk.Button(texture_row, text="SOURCE", style="Secondary.TButton", command=self._open_texture_source)
@@ -892,12 +899,13 @@ class GarageApp(tk.Tk):
         self.editor_vehicle_label.pack(anchor="e")
         self.number_label = ttk.Label(identity_right, text="", style="Panel.TLabel")
         self.number_label.pack(anchor="e", pady=(3, 0))
-        ttk.Button(
+        self.change_stock_button = ttk.Button(
             identity_right,
             text="CHANGE STOCK VEHICLE",
             style="Secondary.TButton",
             command=self._change_stock_vehicle,
-        ).pack(anchor="e", pady=(8, 0))
+        )
+        self.change_stock_button.pack(anchor="e", pady=(8, 0))
 
         bars = ttk.LabelFrame(
             content,
@@ -944,16 +952,6 @@ class GarageApp(tk.Tk):
                 background=COLORS["panel"],
             ).grid(row=row, column=4, sticky="w", padx=8)
         bars.columnconfigure(1, weight=1)
-        ttk.Label(
-            content,
-            text=(
-                "The slider is the normal range; type an exact value to go beyond it. "
-                "Use the stock value as a reference when setting 2x, 3x, or 4x."
-            ),
-            style="Muted.TLabel",
-            wraplength=900,
-        ).pack(anchor="w", pady=(0, 8))
-
         self.advanced_open = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             content,
@@ -1004,7 +1002,7 @@ class GarageApp(tk.Tk):
 
     def _update_name_counter(self) -> None:
         units = len(self.name_var.get().encode("utf-16-be", errors="surrogatepass")) // 2
-        self.name_counter.config(text=f"{units} / {bmg.MAX_VEHICLE_NAME_CODE_UNITS}")
+        self.name_counter.config(text=f"{units} UTF-16 units")
         self.save_vehicle_button.state(
             ["!disabled"] if self.selected_slot is not None else ["disabled"]
         )
@@ -1015,10 +1013,12 @@ class GarageApp(tk.Tk):
         self.show_page("vehicles")
 
     def _cancel_editing(self) -> None:
+        was_preset = self._preset_edit_slot is not None
+        self._preset_edit_slot = None
         self.editing = None
         self._changing_stock_vehicle = False
         self._refresh_garage()
-        self.show_page("garage")
+        self.show_page("install" if was_preset else "garage")
 
     def _browse_textures(self) -> None:
         slot = self._current_slot()
@@ -1116,7 +1116,10 @@ class GarageApp(tk.Tk):
         if slot is not None:
             self._set_bar_value(bar, value, slot)
 
-    def _start_editing(self, creation: Creation | None, slot: int | None = None) -> None:
+    def _start_editing(self, creation: Creation | None, slot: int | None = None, *, preset: bool = False) -> None:
+        self._preset_edit_slot = creation.slot if preset and creation else None
+        if preset:
+            self._changing_stock_vehicle = False
         self.editing = creation
         if slot is None:
             slot = creation.slot if creation else (self.selected_slot if self.selected_slot is not None else 0)
@@ -1131,10 +1134,20 @@ class GarageApp(tk.Tk):
         self._fill_vehicles(select_slot=slot)
         self.name_var.set(creation.name if creation else "")
         self._update_name_counter()
-        self.number_label.config(text=f"#{creation.number}" if creation else f"#{self.library.next_number()} (new)")
+        self.number_label.config(text=(
+            "ONNY'S CUSTOM VEHICLES DRAFT" if preset else
+            f"#{creation.number}" if creation and creation.number > 0 else f"#{self.library.next_number()} (new)"
+        ))
+        self.save_vehicle_button.config(text="SAVE PRESET" if preset else "SAVE VEHICLE")
+        self.editor_back_button.config(text="< BACK TO INSTALL" if preset else "< BACK TO GARAGE")
+        state = ["disabled"] if preset else ["!disabled"]
+        self.browse_texture_button.state(state)
+        self.change_stock_button.state(state)
         overrides = creation.stats if creation and creation.slot == slot else {}
         self._load_values(slot, overrides)
         self._refresh_texture_label()
+        if preset:
+            self.texture_label.config(text="Preset editing supports stats and names only; textures stay in My Garage.")
         self.show_page("editor")
 
     def _reset_to_stock(self) -> None:
@@ -1142,14 +1155,15 @@ class GarageApp(tk.Tk):
         if slot is not None:
             self._load_values(slot, {})
 
-    def _collect_stats(self, slot: int) -> dict:
+    def _collect_stats(self, slot: int, preserve_fields: set[str] | None = None) -> dict:
         stats: dict = {}
+        preserve_fields = preserve_fields or set()
         for bar in BARS:
             text = self.bar_value_vars[bar.key].get().strip()
             shown, original = self._bar_values[bar.key]
             value = original if text == shown else bar.parse_value(text)
             stock = self._stock_value(slot, bar.field)
-            if (value != stock if bar.is_int else not same_game_value(value, stock)):
+            if bar.field in preserve_fields or (value != stock if bar.is_int else not same_game_value(value, stock)):
                 stats[bar.field] = value
         for field, label, _hint in ADVANCED_FIELDS:
             text = self.advanced_vars[field].get().strip()
@@ -1161,7 +1175,7 @@ class GarageApp(tk.Tk):
             if not math.isfinite(value) or abs(value) > 3.402823466e38:
                 raise ValueError(f"{label} must be a finite 32-bit float")
             stock = self._stock_value(slot, field)
-            if not same_game_value(value, stock):
+            if field in preserve_fields or not same_game_value(value, stock):
                 stats[field] = value
         return stats
 
@@ -1175,16 +1189,34 @@ class GarageApp(tk.Tk):
             messagebox.showwarning("Name it", "Give your creation a name.")
             self.name_entry.focus_set()
             return
-        if not bmg.vehicle_name_fits_ui_limit(name):
+        if not bmg.valid_vehicle_name(name):
             messagebox.showwarning(
-                "Name too long",
-                f"Vehicle names are limited to {bmg.MAX_VEHICLE_NAME_CODE_UNITS} UTF-16 characters to fit in-game.",
+                "Invalid name", "Use printable characters that can be encoded in UTF-16.",
             )
             return
         try:
-            stats = self._collect_stats(slot)
+            if self._preset_edit_slot is not None:
+                if OFFICIAL_RELEASE or slot != self._preset_edit_slot or self.edit_texture is not None:
+                    raise ValueError("This preset must keep its original stock vehicle and cannot include a texture.")
+                fields = {bar.field for bar in BARS}
+                if self.editing:
+                    fields.update(self.editing.stats)
+                stats = self._collect_stats(slot, fields)
+            else:
+                stats = self._collect_stats(slot)
         except ValueError as err:
             messagebox.showwarning("Check the stats", str(err))
+            return
+        if self._preset_edit_slot is not None:
+            try:
+                presets.save_draft(self.root_dir, Creation(name=name, stats=stats, slot=slot))
+            except (OSError, ValueError) as err:
+                messagebox.showerror("Save preset failed", str(err))
+                return
+            self._preset_edit_slot = None
+            self.editing = None
+            self._refresh_install_summary()
+            self.show_page("install")
             return
         number = self.editing.number if self.editing else 0
         creation = Creation(name=name, stats=stats, slot=slot, number=number, enabled=self.editing.enabled if self.editing else True, texture=self.edit_texture)
@@ -1212,6 +1244,22 @@ class GarageApp(tk.Tk):
             text="Review your vehicles and choose where the mod should go.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(3, 12))
+
+        collection = ttk.LabelFrame(page, text="  VEHICLE COLLECTION  ", padding=8, style="Panel.TLabelframe")
+        collection.pack(fill="x", pady=(0, 8))
+        default_collection = self.settings.build_collection or ("garage" if self.library.all() else "onny")
+        self.build_collection = tk.StringVar(value=default_collection)
+        ttk.Radiobutton(
+            collection, text="My Garage", variable=self.build_collection, value="garage",
+            command=self._refresh_install_summary,
+        ).pack(side="left", padx=(0, 18))
+        ttk.Radiobutton(
+            collection, text="OnnY's Custom Vehicles (36)", variable=self.build_collection, value="onny",
+            command=self._refresh_install_summary,
+        ).pack(side="left")
+        ttk.Button(
+            collection, text="VIEW EXAMPLES", style="Secondary.TButton", command=self._show_presets,
+        ).pack(side="right")
 
         self.folders = dolphin.find_folders(
             Path(self.settings.dolphintool).with_name("Dolphin.exe") if self.settings.dolphintool else None
@@ -1291,13 +1339,6 @@ class GarageApp(tk.Tk):
         self.cancel_build_button.state(["disabled"])
         self.progress = ttk.Progressbar(actions, maximum=100, length=420)
         self.progress.pack(side="left", fill="x", expand=True, padx=14)
-        self.unlock_button = ttk.Button(
-            page,
-            text="SET UP CHARACTER & VEHICLE UNLOCK",
-            style="Secondary.TButton",
-            command=self._setup_unlock,
-        )
-        self.unlock_button.pack(anchor="w", pady=(8, 0))
         self.install_status = ttk.Label(
             page,
             text="",
@@ -1316,64 +1357,6 @@ class GarageApp(tk.Tk):
                 "Alternatively, right-click the game in Dolphin and choose 'Start with Riivolution Patches'."
             ),
         ).pack(anchor="w", pady=(16, 0))
-
-    def _setup_unlock(self) -> None:
-        if not self._require_stock():
-            return
-        game = self.settings.game_id
-        tool = Path(self.settings.dolphintool) if self.settings.dolphintool else None
-        image = Path(self.settings.disc) if self.settings.disc else None
-        exe = tool.with_name("Dolphin.exe") if tool else None
-        if tool is None or not tool.is_file() or image is None or not image.is_file() or exe is None or not exe.is_file():
-            messagebox.showwarning("Dolphin setup", "Choose a valid game image and DolphinTool.exe on the Setup page.")
-            return
-        try:
-            disc.validate_game_id(game)
-        except ValueError as err:
-            messagebox.showerror("Unsupported game", str(err))
-            return
-        folders = dolphin.find_folders(exe)
-        if not messagebox.askyesno(
-            "Set up License Unlock",
-            f"Close Dolphin and back up your Mario Kart Wii save first.\n\n"
-            f"This adds Wiimm's region-specific Gecko code to Dolphin for {game} and enables cheats "
-            "for this game. Other enabled cheats for this game may also run.\n\n"
-            "Activating the code in-game and saving makes the unlock permanent. "
-            "The code unlocks one licence's characters, vehicles and courses, not trophies.\n\n"
-            f"Dolphin user folder: {folders.user_dir}\n\nContinue?",
-        ):
-            return
-        self.unlock_button.state(["disabled"])
-        self.install_status.config(text="Setting up License Unlock...")
-
-        def work():
-            actual_game = disc.read_game_id(tool, image)
-            if actual_game != game:
-                raise ValueError(f"The selected image is {actual_game}, but the imported data is {game}. Re-import the game.")
-            code = unlock.fetch_code(game)
-            return unlock.install(folders.user_dir, game, code)
-
-        def done(result, error):
-            self.unlock_button.state(["!disabled"])
-            if error:
-                self.install_status.config(text=f"License Unlock setup failed: {error}")
-                messagebox.showerror("License Unlock setup failed", str(error))
-                return
-            target, backup = result
-            self.install_status.config(text=f"License Unlock configured for {game}.")
-            backup_text = f"\n\nPrevious game settings backup: {backup}" if backup else ""
-            messagebox.showinfo(
-                "License Unlock ready",
-                f"Configured {target}.{backup_text}\n\n"
-                "In Dolphin, start the game. At the licence selection screen, hold PLUS, MINUS, 1 and B "
-                "on controller 1, then press the D-pad direction of the licence you want. "
-                "The code's original instructions describe a Wii Remote rotated 45 degrees counterclockwise.\n\n"
-                "A sound speed-up indicates success. Complete a race or change a Mii to save permanently. "
-                "Trophies are not changed.\n\n"
-                f"Instructions: {unlock.SOURCE}",
-            )
-
-        self._run_in_background(work, done)
 
     def _choose_path(self, key: str, *, is_file: bool, existing: str = "", parent=None, **options) -> str:
         try:
@@ -1396,6 +1379,14 @@ class GarageApp(tk.Tk):
             var.set(chosen)
 
     def _refresh_install_summary(self) -> None:
+        if self.build_collection.get() == "onny":
+            draft = "\nDevelopment draft will be used." if not OFFICIAL_RELEASE and (self.root_dir / presets.DRAFT_FILE).is_file() else ""
+            self.install_summary.config(
+                text="OnnY's Custom Vehicles will replace all 36 stock vehicle slots.\n"
+                "Your saved creations are unchanged and are not included in this build.\n"
+                "Preset names may be shortened to fit your game's language files." + draft
+            )
+            return
         active = [c for c in self.library.all() if c.enabled]
         if active:
             lines = [f"{len(active)} creation(s) will be installed:"]
@@ -1403,6 +1394,94 @@ class GarageApp(tk.Tk):
         else:
             lines = ["No creations are included yet. Add a vehicle in My Garage before installing."]
         self.install_summary.config(text="\n".join(lines))
+
+    def _show_presets(self) -> None:
+        try:
+            items = presets.creations(None if OFFICIAL_RELEASE else self.root_dir)
+        except (OSError, ValueError) as err:
+            messagebox.showerror("Preset collection", str(err))
+            return
+        window = tk.Toplevel(self)
+        window.title("OnnY's Custom Vehicles")
+        window.transient(self)
+        window.geometry("560x500")
+        frame = ttk.Frame(window, style="App.TFrame", padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="ONNY'S CUSTOM VEHICLES", style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            frame, text=(
+                "Development draft: edit presets or export the collection. Names may be shortened to fit your game."
+                if not OFFICIAL_RELEASE else
+                "Use this collection instead of My Garage, or edit a copy. Names may be shortened to fit your game."
+            ),
+            style="Muted.TLabel", wraplength=500,
+        ).pack(anchor="w", pady=(4, 8))
+        buttons = ttk.Frame(frame, style="App.TFrame")
+        buttons.pack(side="bottom", fill="x", pady=(8, 0))
+        list_frame = ttk.Frame(frame, style="App.TFrame")
+        list_frame.pack(fill="both", expand=True)
+        scroll = ttk.Scrollbar(list_frame, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        listing = tk.Listbox(
+            list_frame, background=COLORS["panel"], foreground=COLORS["text"],
+            selectbackground=COLORS["selected"], yscrollcommand=scroll.set,
+        )
+        listing.pack(fill="both", expand=True)
+        scroll.config(command=listing.yview)
+        for creation in items:
+            listing.insert("end", f"{creation.name}  |  replaces {VEHICLES[creation.slot].name}")
+
+        def edit_selected(direct: bool) -> None:
+            selected = listing.curselection()
+            if not selected or not self._require_stock():
+                return
+            creation = items[selected[0]]
+            window.destroy()
+            self._start_editing(creation, preset=direct)
+
+        edit_copy = ttk.Button(buttons, text="EDIT GARAGE COPY", style="Secondary.TButton", command=lambda: edit_selected(False))
+        edit_copy.pack(side="left")
+        edit_buttons = [edit_copy]
+        if not OFFICIAL_RELEASE:
+            edit_draft = ttk.Button(buttons, text="EDIT PRESET", style="Primary.TButton", command=lambda: edit_selected(True))
+            edit_draft.pack(side="left", padx=6)
+            edit_buttons.append(edit_draft)
+            ttk.Button(buttons, text="EXPORT JSON", style="Secondary.TButton", command=self._export_presets).pack(side="right")
+        for button in edit_buttons:
+            button.state(["disabled"])
+
+        def selected(_event) -> None:
+            for button in edit_buttons:
+                button.state(["!disabled"] if listing.curselection() else ["disabled"])
+
+        listing.bind("<<ListboxSelect>>", selected)
+
+    def _export_presets(self) -> None:
+        if OFFICIAL_RELEASE:
+            return
+        try:
+            items = presets.creations(self.root_dir)
+            initial = self.settings.picker_folder("preset_export")
+        except (OSError, ValueError) as err:
+            messagebox.showerror("Export presets", str(err))
+            return
+        chosen = filedialog.asksaveasfilename(
+            parent=self, title="Export OnnY's Custom Vehicles", initialdir=str(initial),
+            initialfile="onny-presets.json", defaultextension=".json",
+            filetypes=[("Preset collection", "*.json")],
+        )
+        if not chosen:
+            return
+        try:
+            presets.write(Path(chosen), items)
+        except (OSError, ValueError) as err:
+            messagebox.showerror("Export presets", str(err))
+            return
+        try:
+            self.settings.remember_folder("preset_export", chosen, True, self.root_dir)
+        except OSError as err:
+            messagebox.showwarning("Remember folder", f"Preset export succeeded, but its folder could not be saved: {err}")
+        messagebox.showinfo("Preset export", f"Exported all 36 presets to:\n{chosen}")
 
     def _install_targets(self) -> list[Path]:
         targets = []
@@ -1421,10 +1500,64 @@ class GarageApp(tk.Tk):
         else:
             self.install_status.config(text="Finishing installation; it can no longer be cancelled.")
 
+    def _dolphin_close_prompt(self) -> bool:
+        window = tk.Toplevel(self)
+        window.title("Close Dolphin")
+        window.transient(self)
+        window.resizable(False, False)
+        window.configure(background=COLORS["background"])
+        frame = ttk.Frame(window, style="App.TFrame", padding=18)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(
+            frame,
+            text="Dolphin is running. Please close all Dolphin windows before continuing.",
+            style="App.TLabel", wraplength=380,
+        ).pack(anchor="w")
+        ttk.Label(
+            frame, text="Exit cancels Build & Play; it will not close this app.",
+            style="Muted.TLabel", wraplength=380,
+        ).pack(anchor="w", pady=(6, 12))
+        buttons = ttk.Frame(frame, style="App.TFrame")
+        buttons.pack(fill="x")
+        result = False
+
+        def finish(continue_build: bool) -> None:
+            nonlocal result
+            result = continue_build
+            window.destroy()
+
+        ttk.Button(buttons, text="CONTINUE", style="Primary.TButton", command=lambda: finish(True)).pack(side="left")
+        ttk.Button(buttons, text="EXIT", style="Secondary.TButton", command=lambda: finish(False)).pack(side="right")
+        window.protocol("WM_DELETE_WINDOW", lambda: finish(False))
+        window.grab_set()
+        self.wait_window(window)
+        return result
+
+    def _ensure_dolphin_closed(self) -> bool:
+        try:
+            while dolphin.is_running():
+                if not self._dolphin_close_prompt():
+                    return False
+        except OSError as err:
+            messagebox.showerror("Dolphin check failed", f"Could not check whether Dolphin is running: {err}")
+            return False
+        return True
+
     def _build_mod(self, play: bool = False) -> None:
         if not self._require_stock():
             return
-        creations = self.library.all()
+        collection = self.build_collection.get()
+        if collection == "onny":
+            try:
+                creations = presets.creations(None if OFFICIAL_RELEASE else self.root_dir)
+            except (OSError, ValueError) as err:
+                messagebox.showerror("Preset collection", str(err))
+                return
+        elif collection == "garage":
+            creations = self.library.all()
+        else:
+            messagebox.showerror("Vehicle collection", "Choose a valid vehicle collection.")
+            return
         if slot_conflicts(creations):
             messagebox.showwarning("Conflict", "Two included creations replace the same vehicle. Fix that in My Garage first.")
             return
@@ -1434,10 +1567,13 @@ class GarageApp(tk.Tk):
         if not targets:
             messagebox.showwarning("Choose a folder", "Tick at least one place to install the mod.")
             return
+        if play and not self._ensure_dolphin_closed():
+            return
         self.settings.install_riivolution = self.use_riivolution.get()
         self.settings.install_sd_sync = self.use_sd_sync.get()
         self.settings.install_custom = self.use_custom.get()
         self.settings.output = self.custom_var.get()
+        self.settings.build_collection = collection
         self.settings.save(self.root_dir)
 
         game = self.settings.game_id
@@ -1469,6 +1605,11 @@ class GarageApp(tk.Tk):
 
         def work():
             cancel.check()
+            shortened = []
+            build_creations = creations
+            if collection == "onny":
+                progress("Checking preset names...", 0)
+                build_creations, shortened = presets.fit_names(creations, self.cache / game, game, cancel.check)
             if play:
                 imported_game = disc.read_game_id(tool, image)
                 if imported_game != game:
@@ -1476,10 +1617,10 @@ class GarageApp(tk.Tk):
                         f"The selected game image is {imported_game}, but the imported data is {game}. "
                         "Re-import the game on the Setup page."
                     )
-            result = export.install_mod(self.cache / game, game, creations, targets, progress, texture_dir(self.root_dir), cancel)
+            result = export.install_mod(self.cache / game, game, build_creations, targets, progress, texture_dir(self.root_dir), cancel)
             if play:
                 dolphin.launch_mod(exe, image, game, self.folders.riivolution, self.root_dir / "dolphin-launch.json")
-            return result
+            return result, shortened
 
         def done(result, error):
             self._build_cancel = None
@@ -1495,7 +1636,9 @@ class GarageApp(tk.Tk):
             else:
                 self.progress.config(value=100)
                 prefix = "Launched Dolphin. Installed into:\n" if play else "Done. Installed into:\n"
-                self.install_status.config(text=prefix + "\n".join(str(p) for p in result))
+                targets_done, shortened = result
+                names = "\nShortened preset names: " + ", ".join(shortened) if shortened else ""
+                self.install_status.config(text=prefix + "\n".join(str(p) for p in targets_done) + names)
 
         self._run_in_background(work, done)
 

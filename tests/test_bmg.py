@@ -4,7 +4,7 @@ import unittest
 from vehiclegarage.bmg import (
     read_message,
     replace_messages,
-    vehicle_name_fits_ui_limit,
+    valid_vehicle_name,
     vehicle_name_message_ids,
 )
 
@@ -38,11 +38,11 @@ def build_bmg(messages: list[tuple[int, str]]) -> bytes:
 
 
 class BmgTests(unittest.TestCase):
-    def test_ui_name_limit_counts_utf16_code_units(self):
-        self.assertTrue(vehicle_name_fits_ui_limit("Maxi Turbo"))
-        self.assertFalse(vehicle_name_fits_ui_limit("Maxi Turboo"))
-        self.assertTrue(vehicle_name_fits_ui_limit("🚗" * 5))
-        self.assertFalse(vehicle_name_fits_ui_limit("🚗" * 6))
+    def test_name_accepts_longer_text_and_rejects_invalid_characters(self):
+        self.assertTrue(valid_vehicle_name("Standard Kart S"))
+        self.assertTrue(valid_vehicle_name("🚗" * 6))
+        self.assertFalse(valid_vehicle_name("Bad\nName"))
+        self.assertFalse(valid_vehicle_name("\ud800"))
 
     def test_replaces_vehicle_name_messages_without_resizing(self):
         source = build_bmg(
@@ -59,6 +59,12 @@ class BmgTests(unittest.TestCase):
         for message_id in replacements:
             self.assertEqual(read_message(patched, message_id), "Garage Kart")
         self.assertEqual(read_message(patched, 9101), "Standard Kart M")
+
+    def test_long_name_is_allowed_when_existing_slot_has_space(self):
+        source = build_bmg([(9100, "A long original name"), (9101, "Other")])
+        patched = replace_messages(source, {9100: "Longer than ten"})
+        self.assertEqual(read_message(patched, 9100), "Longer than ten")
+        self.assertEqual(len(patched), len(source))
 
     def test_rejects_names_that_do_not_fit_and_unexpected_stock_text(self):
         source = build_bmg([(9100, "Standard Kart S"), (9101, "Standard Kart M")])

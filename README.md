@@ -1,4 +1,4 @@
-# Custom Vehicle Garage
+# Custom Vehicle Garage for Mario Kart Wii
 
 Design your own Mario Kart Wii vehicles on the PC and install them as a Riivolution mod. Creations replace the game's 36 stock vehicles, so you choose which stock vehicle each one takes over.
 
@@ -8,8 +8,8 @@ Design your own Mario Kart Wii vehicles on the PC and install them as a Riivolut
 2. **Setup** (first run): pick your own Mario Kart Wii image (ISO, RVZ, WBFS...) and `DolphinTool.exe` (it comes with Dolphin), then import. You can browse for them or search a selected drive, starting with common locations; stop the search once you have found the files. Nothing from the game ships with this app.
 3. **My Garage**: create a vehicle, search saved creations by name or weight class, edit them, or include/exclude them from the mod.
 4. **Choose Vehicle**: pick the stock kart or bike your creation will replace. Cards show saved creations and whether they are included or excluded.
-5. **Tune Your Vehicle**: enter the required in-game name (up to 10 UTF-16 code units) and adjust its stats. Numeric values can exceed the slider range; to use 2×, 3×, or 4×, multiply the displayed stock value and enter the result. Hover over a value for its description and stock range. Displayed values are rounded for readability; unchanged values retain their full precision. Optionally select **Browse Textures** to find a community appearance.
-6. **Build & Install**: review the creations and destinations. The app finds Dolphin's own folders (`Load\Riivolution` and the SD card sync folder) and installs the mod there, so no root needs changing. You can also add another folder, such as a real Wii SD card. Choose **Build & Play in Dolphin** to build the latest creations and launch the game with the mod enabled; this always installs to Dolphin's Riivolution folder as well as your selected destinations. Dolphin.exe must be beside the configured DolphinTool.exe. Alternatively, in Dolphin, right-click Mario Kart Wii, choose "Start with Riivolution Patches...", and set Custom Vehicle Garage to Enabled. Leave the SD Root as Dolphin shows it.
+5. **Tune Your Vehicle**: enter the required in-game name and adjust its stats. Numeric values can exceed the slider range. Hover over a value for its description and stock range. Displayed values are rounded for readability; unchanged values retain their full precision. Optionally select **Browse Textures** to find a community appearance.
+6. **Build & Install**: choose **My Garage** or **OnnY's Custom Vehicles**, then review the destinations. Use **View Examples** and **Edit Garage Copy** to create your own version of a preset; editing a copy does not change the built-in collection. The app finds Dolphin's own folders (`Load\Riivolution` and the SD card sync folder) and installs the mod there, so no root needs changing. You can also add another folder, such as a real Wii SD card. Choose **Build & Play in Dolphin** to build the selected collection and launch the game with the mod enabled; this always installs to Dolphin's Riivolution folder as well as your selected destinations. On Windows, close any running Dolphin instances when prompted before continuing; Exit cancels Build & Play without closing the garage. Dolphin.exe must be beside the configured DolphinTool.exe. Alternatively, in Dolphin, right-click Mario Kart Wii, choose "Start with Riivolution Patches...", and set Custom Vehicle Garage to Enabled. Leave the SD Root as Dolphin shows it.
 
 Use **Cancel Build** to stop before installation and keep the previous mod at every destination. Once the final installation starts, cancellation is unavailable. Repeated builds reuse locally cached patched archives when the source and relevant changes are unchanged; the first build after changing stats or names still needs to compress the affected archives.
 
@@ -17,7 +17,13 @@ US (`RMCE01`), European (`RMCP01`), Japanese (`RMCJ01`) and Korean (`RMCK01`) ga
 
 The in-game bars use `machine_para.bin`, a separate table of visual ratings; the game does not derive these bars from the gameplay values in `kartParam.bin`. The garage updates both: gameplay values in `kartParam.bin` and the matching visual ratings in all seven UI archives. A slider at its high end maps to a menu rating of 20; values entered beyond the slider range extend the rating beyond 20. Display ratings must fit the file's signed 16-bit field. The Off-Road control edits the standard off-road speed multiplier (KCL flag `0x03`).
 
-Vehicle names are patched in language-specific UI message archives. The name field allows up to 10 UTF-16 code units so names fit the in-game label space; the exporter still checks each selected slot and reports its available limit rather than resizing game archives.
+Vehicle names are patched in language-specific UI message archives. Each slot and language has its own existing string space; the exporter checks it and reports when a name does not fit rather than resizing game archives. Longer names may also be clipped by the game even if they fit in the file; that has not been tested.
+
+## Refining OnnY's Custom Vehicles
+
+OnnY's Custom Vehicles includes 36 strong, challenging and silly builds, including Feather, which is light and fast. In a development build, open **Build & Install > View Examples**, select a vehicle, and choose **Edit Preset**. Saving updates a local draft, separate from My Garage. Select OnnY's Custom Vehicles when building to test the draft. The preset's stock slot is fixed, and this workflow edits names and stats only, not textures.
+
+Choose **Export JSON** in the examples window to save the complete 36-vehicle collection. To incorporate an approved export into a future build, replace `vehiclegarage/assets/onny-presets.json` with that file and run the test suite. Exports contain preset names and stats, not game data. Official release builds ignore local drafts and do not show the development editing or export controls; **Edit Garage Copy** remains available.
 
 ## Community textures
 
@@ -33,11 +39,11 @@ Official release builds check GitHub when they start and show **Update** only if
 
 GitHub Actions tests and builds pushes to `main`. Successful builds of the current `main` commit publish a Windows release with version `0.<workflow run>.<attempt>`; a later run receives a higher version. Pull requests are tested and built but not released. Pushing several commits together produces one build of the final commit, and a build superseded by a newer `main` commit is not published. Download the first update-capable executable from GitHub Releases; older builds cannot update themselves.
 
-## Unlock characters, vehicles and courses in Dolphin
+## Credits
 
-On **Build & Install**, choose **Set Up Character & Vehicle Unlock**. Close Dolphin and back up your Wii save first. After confirmation, the app downloads and verifies [Wiimm's License Unlock code](https://mkwiiki.org/wiki/License_Unlock) for the imported game's region and adds it to Dolphin's game-specific settings. It enables cheats for that game, so any other enabled codes for it can also run. Existing game settings are backed up when changed; the save itself is not backed up by the app. A revision-specific GameINI must be configured manually in Dolphin instead.
+Created by **Swon404 and OnnY**. Thanks to the [Dolphin](https://dolphin-emu.org/) team, the [Custom Mario Kart Wiiki](https://mkwiiki.org/) community, and the individual texture creators credited in the browser. Community texture content belongs to its respective creators; check their terms before reusing or distributing it. The executable includes Python and other runtime components with their own [licence notices](https://docs.python.org/3/license.html). Mario Kart Wii is a Nintendo game; this project is not affiliated with Nintendo.
 
-Start the game in Dolphin. At the licence selection screen, hold **Plus + Minus + 1 + B** on controller 1 and press the D-pad direction of the licence to unlock. The original instructions specify a Wii Remote rotated 45 degrees counterclockwise. The game sound briefly speeds up on success. Complete a race or change a Mii to save the unlocks permanently. This unlocks drivers, vehicles and courses for that licence, without changing trophies. The button configures Dolphin; it does not add a Gecko handler to the Riivolution files for a real Wii. The interaction with Dolphin's Riivolution launch and in-game activation still needs testing.
+The former unlock setup option is no longer included. Removing it does not undo cheats or save changes previously made in Dolphin.
 
 ## Build the exe
 
