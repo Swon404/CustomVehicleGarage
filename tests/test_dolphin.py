@@ -176,6 +176,7 @@ class DolphinFolderTests(unittest.TestCase):
                 _run_in_background=lambda work, done: done(work(), None),
                 _ensure_dolphin_closed=lambda: True,
                 build_collection=Mock(get=Mock(return_value="garage")),
+                fit_garage_names=Mock(get=Mock(return_value=False)),
             )
             with patch("vehiclegarage.app.disc.read_game_id", return_value="RMCE01"), \
                     patch("vehiclegarage.app.export.install_mod", return_value=[sd_root]) as install, \
@@ -200,6 +201,7 @@ class DolphinFolderTests(unittest.TestCase):
                 cancel_build_button=Mock(), install_status=Mock(), progress=Mock(), events=queue.Queue(),
                 _ensure_dolphin_closed=lambda: True,
                 build_collection=Mock(get=Mock(return_value="garage")),
+                fit_garage_names=Mock(get=Mock(return_value=False)),
             )
             def run(work, done):
                 try:

@@ -22,6 +22,31 @@ def same_game_value(first: float | int, second: float | int) -> bool:
     return struct.pack(">f", float(first)) == struct.pack(">f", float(second))
 
 
+def advanced_slider_range(field: str, values: list[float]) -> tuple[float, float]:
+    if not values or not all(math.isfinite(value) for value in values):
+        raise ValueError(f"{field}: stock values must be finite.")
+    if field == "max_normal_acceleration":
+        return 1.0, 12.0
+    low, high = min(values), max(values)
+    if low == high:
+        if low > 0:
+            return 0.0, low * 2
+        if low < 0:
+            return low * 2, 0.0
+        return -1.0, 1.0
+    return low, high
+
+
+def parse_advanced_value(text: str, label: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise ValueError(f"{label} must be a number, got '{text}'") from None
+    if not math.isfinite(value) or abs(value) > 3.402823466e38:
+        raise ValueError(f"{label} must be a finite 32-bit float")
+    return value
+
+
 @dataclass(frozen=True)
 class StatBar:
     key: str

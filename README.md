@@ -2,14 +2,19 @@
 
 Design your own Mario Kart Wii vehicles on the PC and install them as a Riivolution mod. Creations replace the game's 36 stock vehicles, so you choose which stock vehicle each one takes over.
 
-## Use it
+## Getting started
 
-1. Run `dist\CustomVehicleGarage.exe` (or `python -m vehiclegarage`).
-2. **Setup** (first run): pick your own Mario Kart Wii image (ISO, RVZ, WBFS...) and `DolphinTool.exe` (it comes with Dolphin), then import. You can browse for them or search a selected drive, starting with common locations; stop the search once you have found the files. Nothing from the game ships with this app.
-3. **My Garage**: create a vehicle, search saved creations by name or weight class, edit them, or include/exclude them from the mod.
-4. **Choose Vehicle**: pick the stock kart or bike your creation will replace. Cards show saved creations and whether they are included or excluded.
-5. **Tune Your Vehicle**: enter the required in-game name and adjust its stats. Numeric values can exceed the slider range. Hover over a value for its description and stock range. Displayed values are rounded for readability; unchanged values retain their full precision. Optionally select **Browse Textures** to find a community appearance.
-6. **Build & Install**: choose **My Garage** or **OnnY's Custom Vehicles**, then review the destinations. Use **View Examples** and **Edit Garage Copy** to create your own version of a preset; editing a copy does not change the built-in collection. The app finds Dolphin's own folders (`Load\Riivolution` and the SD card sync folder) and installs the mod there, so no root needs changing. You can also add another folder, such as a real Wii SD card. Choose **Build & Play in Dolphin** to build the selected collection and launch the game with the mod enabled; this always installs to Dolphin's Riivolution folder as well as your selected destinations. On Windows, close any running Dolphin instances when prompted before continuing; Exit cancels Build & Play without closing the garage. Dolphin.exe must be beside the configured DolphinTool.exe. Alternatively, in Dolphin, right-click Mario Kart Wii, choose "Start with Riivolution Patches...", and set Custom Vehicle Garage to Enabled. Leave the SD Root as Dolphin shows it.
+1. Run `CustomVehicleGarage.exe` (or `python -m vehiclegarage` from the source folder).
+2. In **Setup**, select your own Mario Kart Wii disc image and Dolphin's `DolphinTool.exe`, then choose **Import Game Data**. Game files are not included with the app.
+3. In **My Garage**, choose **Create Vehicle**, pick the stock kart or bike it will replace, give it a name, adjust its stats, and save it.
+4. Open **Build & Install** and select either your garage or **OnnY's Custom Vehicles**. OnnY's collection replaces all 36 slots; use **View Examples** to explore it.
+5. Choose **Build & Play in Dolphin**, or select a destination and choose **Build & Install Mod**. For a Wii, select the SD card as a destination and use Riivolution.
+
+## Building and playing
+
+To edit an OnnY preset without changing the built-in collection, choose **View Examples** and **Edit Garage Copy**. The app can install to Dolphin's `Load\Riivolution` and SD card sync folders, or to another folder such as a Wii SD card. **Build & Play in Dolphin** always installs to Dolphin's Riivolution folder as well as your selected destinations. On Windows, close any running Dolphin instances when prompted; Exit cancels Build & Play. `Dolphin.exe` must be beside the configured `DolphinTool.exe`.
+
+Alternatively, in Dolphin, right-click Mario Kart Wii, choose "Start with Riivolution Patches...", and enable Custom Vehicle Garage. Leave the SD Root as Dolphin shows it.
 
 Use **Cancel Build** to stop before installation and keep the previous mod at every destination. Once the final installation starts, cancellation is unavailable. Repeated builds reuse locally cached patched archives when the source and relevant changes are unchanged; the first build after changing stats or names still needs to compress the affected archives.
 
@@ -17,13 +22,27 @@ US (`RMCE01`), European (`RMCP01`), Japanese (`RMCJ01`) and Korean (`RMCK01`) ga
 
 The in-game bars use `machine_para.bin`, a separate table of visual ratings; the game does not derive these bars from the gameplay values in `kartParam.bin`. The garage updates both: gameplay values in `kartParam.bin` and the matching visual ratings in all seven UI archives. A slider at its high end maps to a menu rating of 20; values entered beyond the slider range extend the rating beyond 20. Display ratings must fit the file's signed 16-bit field. The Off-Road control edits the standard off-road speed multiplier (KCL flag `0x03`).
 
-Vehicle names are patched in language-specific UI message archives. Each slot and language has its own existing string space; the exporter checks it and reports when a name does not fit rather than resizing game archives. Longer names may also be clipped by the game even if they fit in the file; that has not been tested.
+Vehicle names are patched in language-specific UI message archives. Each slot and language has its own existing string space; the exporter checks it and reports when a name does not fit rather than resizing game archives. Each garage can opt in to **Shorten garage vehicle names** on the Build & Install page; the app reports shortened names without changing the saved creations. Longer names may also be clipped by the game even if they fit in the file; that has not been tested.
+
+When tuning a vehicle, hover over a value for its description and stock range. Displayed values are rounded for readability; unchanged values retain their full precision. Advanced sliders use the imported stock vehicles' minimum and maximum values. When every stock value is identical, the range extends from zero to twice that value (or -1 to 1 if it is zero). Max normal acceleration uses 1–12. These are editing ranges, not safety limits: exact values outside them remain editable and are preserved until changed.
+
+## Organising and sharing garages
+
+The garage picker switches between independent collections. Switching does not change the installed mod: build and install again when ready. Each garage can hold multiple creations for a slot, but only one can be included in the mod at a time. Use **File Vehicle** to copy or move the selected creation to another garage; if that garage already has an included creation for the slot, the filed copy is excluded until you change it. **Manage Garages > Copy Onny's** makes an independent, editable copy of the full OnnY collection.
+
+**Export Garage** saves a JSON file with vehicle names, stats, slot assignments, inclusion settings, name-fitting preference, and texture references/credits. **File Vehicle > Export vehicle** exports one creation. **Import** opens either file; a garage is imported as a new garage and a vehicle is added to the current garage. OnnY development JSON exports can also be imported as new garages. Name shortening is enabled for these OnnY imports and copies because their names may not fit every game's language files.
+
+Transfer files do **not** contain texture archives or game data. On another PC, re-import any missing texture from its creator; the app warns if a referenced file is missing or fails its checksum. Re-importing the same texture should restore the saved reference. Check creators' terms before sharing their work.
+
+Existing creations stay in their original data folder as **My Garage**. On first use, the app also copies existing creation JSON files to `garage-migration-backup` in its data folder; it does not overwrite that backup on later runs. Deleting a garage does not delete this backup or affect other garages or an already installed mod.
 
 ## Refining OnnY's Custom Vehicles
 
-OnnY's Custom Vehicles includes 36 strong, challenging and silly builds, including Feather, which is light and fast. In a development build, open **Build & Install > View Examples**, select a vehicle, and choose **Edit Preset**. Saving updates a local draft, separate from My Garage. Select OnnY's Custom Vehicles when building to test the draft. The preset's stock slot is fixed, and this workflow edits names and stats only, not textures.
+OnnY's Custom Vehicles includes 36 strong, challenging and silly builds, including Feather, which is extremely light and fast. Some values exceed the normal slider ranges and their in-game effects have not been verified. Choose **Manage Garages > Copy Onny's**, edit the resulting garage normally, and build that garage to test your changes. Previously saved development drafts are still used in development builds and included when copying OnnY's; they are not modified or deleted.
 
-Choose **Export JSON** in the examples window to save the complete 36-vehicle collection. To incorporate an approved export into a future build, replace `vehiclegarage/assets/onny-presets.json` with that file and run the test suite. Exports contain preset names and stats, not game data. Official release builds ignore local drafts and do not show the development editing or export controls; **Edit Garage Copy** remains available.
+In a development build, select the garage and choose **Export > Export OnnY presets from this garage**. Include exactly one vehicle for each of the 36 stock slots; excluded alternatives are ignored. Presets do not support textures or non-editor stats, so remove these from included vehicles before export. Any unchanged performance values are filled from your imported game's stock data; import the game first if needed. The exported JSON contains names and stats, not game archives.
+
+To incorporate an approved export into a future build, replace `vehiclegarage/assets/onny-presets.json` with that file and run the test suite. Exporting alone does not modify the bundled presets. Official releases ignore local drafts and do not show the preset export tool; **Edit Garage Copy** remains available.
 
 ## Community textures
 
@@ -56,6 +75,8 @@ The former unlock setup option is no longer included. Removing it does not undo 
 ```powershell
 python -m vehiclegarage build --out "D:\sd" --disc "game.rvz" --dolphintool "C:\Dolphin\DolphinTool.exe"
 ```
+
+The command-line build uses the currently selected garage and its name-fitting setting.
 
 ## Not done yet
 

@@ -1,7 +1,6 @@
 """The Custom Vehicle Garage desktop app."""
 
 import ctypes
-import math
 import os
 import queue
 import threading
@@ -10,13 +9,15 @@ import tkinter as tk
 import urllib.parse
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from vehiclegarage import bmg, disc, dolphin, export, presets, updater
-from vehiclegarage.creations import Creation, Library, slot_conflicts
+from vehiclegarage import bmg, disc, dolphin, export, garages, presets, updater
+from vehiclegarage.creations import Creation, slot_conflicts
 from vehiclegarage.kartparam import KartParam
-from vehiclegarage.settings import Settings, cache_dir, data_dir, library_dir, texture_dir
-from vehiclegarage.stats import ADVANCED_FIELDS, BARS, format_value, same_game_value
+from vehiclegarage.settings import Settings, cache_dir, data_dir, texture_dir
+from vehiclegarage.stats import (
+    ADVANCED_FIELDS, BARS, advanced_slider_range, format_value, parse_advanced_value, same_game_value,
+)
 from vehiclegarage.texture_browser import TextureBrowser
 from vehiclegarage.textures import TexturePack
 from vehiclegarage.vehicles import VEHICLES, WEIGHT_CLASSES
@@ -86,11 +87,11 @@ class GarageApp(tk.Tk):
         self.header_art = tk.PhotoImage(file=str(assets / "racing-banner.png"))
         self.root_dir = root_dir or data_dir()
         self.settings = Settings.load(self.root_dir)
-        self.library = Library(library_dir(self.root_dir))
+        self.garages = garages.Garages(self.root_dir)
+        self.library = self.garages.library()
         self.cache = cache_dir(self.root_dir)
         self.stock: KartParam | None = None
         self.editing: Creation | None = None
-        self._preset_edit_slot: int | None = None
         self.selected_slot: int | None = None
         self.edit_texture: TexturePack | None = None
         self._changing_stock_vehicle = False
@@ -497,6 +498,27 @@ class GarageApp(tk.Tk):
 
         panel = ttk.Frame(page, style="Panel.TFrame", padding=12)
         panel.pack(fill="both", expand=True)
+        garage_bar = ttk.Frame(panel, style="Panel.TFrame")
+        garage_bar.pack(fill="x", pady=(0, 8))
+        ttk.Label(garage_bar, text="GARAGE", style="Section.TLabel").pack(side="left", padx=(0, 8))
+        self.garage_picker = ttk.Combobox(garage_bar, state="readonly", width=25)
+        self.garage_picker.pack(side="left", padx=(0, 8))
+        self.garage_picker.bind("<<ComboboxSelected>>", self._choose_garage)
+        ttk.Button(garage_bar, text="MANAGE GARAGES", style="Secondary.TButton",
+                   command=self._manage_garages).pack(side="left", padx=(0, 6))
+        ttk.Button(garage_bar, text="IMPORT", style="Secondary.TButton",
+                   command=self._import_garage_file).pack(side="left", padx=(0, 6))
+        if OFFICIAL_RELEASE:
+            ttk.Button(garage_bar, text="EXPORT GARAGE", style="Secondary.TButton",
+                       command=self._export_garage).pack(side="left")
+        else:
+            export_button = ttk.Menubutton(garage_bar, text="EXPORT", style="Secondary.TButton")
+            export_menu = tk.Menu(export_button, tearoff=False)
+            export_menu.add_command(label="Export garage...", command=self._export_garage)
+            export_menu.add_command(label="Export OnnY presets from this garage...", command=self._export_presets)
+            export_button.configure(menu=export_menu)
+            export_button.pack(side="left")
+        self._refresh_garage_picker()
         toolbar = ttk.Frame(panel, style="Panel.TFrame")
         toolbar.pack(fill="x", pady=(0, 8))
         ttk.Label(toolbar, text="FILTER", style="Section.TLabel").pack(side="left", padx=(0, 12))
@@ -512,17 +534,22 @@ class GarageApp(tk.Tk):
         self.garage_count.pack(side="right")
 
         columns = ("number", "name", "vehicle", "class", "on")
-        self.tree = ttk.Treeview(panel, columns=columns, show="headings", selectmode="browse")
-        for col, text, width in (
-            ("number", "NO.", 70),
-            ("name", "CREATION", 250),
-            ("vehicle", "REPLACES STOCK VEHICLE", 260),
-            ("class", "CLASS", 100),
-            ("on", "IN MOD", 90),
+        table = ttk.Frame(panel, style="Panel.TFrame")
+        table.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(table, columns=columns, show="headings", selectmode="browse")
+        for col, text, width, minimum, anchor, stretch in (
+            ("number", "NO.", 65, 50, "center", False),
+            ("name", "CREATION", 250, 150, "w", True),
+            ("vehicle", "REPLACES STOCK VEHICLE", 260, 200, "w", True),
+            ("class", "CLASS", 90, 75, "center", False),
+            ("on", "IN MOD", 80, 65, "center", False),
         ):
-            self.tree.heading(col, text=text)
-            self.tree.column(col, width=width, anchor="w")
-        self.tree.pack(fill="both", expand=True)
+            self.tree.heading(col, text=text, anchor=anchor)
+            self.tree.column(col, width=width, minwidth=minimum, anchor=anchor, stretch=stretch)
+        scrollbar = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side="left", fill="both", expand=True)
         self.tree.tag_configure("conflict", foreground=COLORS["danger"])
         self.tree.tag_configure("off", foreground="#85838b")
         self.tree.bind("<Double-1>", lambda _e: self._edit_selected())
@@ -536,6 +563,14 @@ class GarageApp(tk.Tk):
         self.toggle_selected_button.pack(side="left", padx=6)
         self.delete_selected_button = ttk.Button(actions, text="DELETE", style="Secondary.TButton", command=self._delete_selected)
         self.delete_selected_button.pack(side="left")
+        self.file_selected_button = ttk.Menubutton(actions, text="FILE VEHICLE", style="Secondary.TButton")
+        file_menu = tk.Menu(self.file_selected_button, tearoff=False)
+        file_menu.add_command(label="Copy to another garage...", command=lambda: self._file_selected(False))
+        file_menu.add_command(label="Move to another garage...", command=lambda: self._file_selected(True))
+        file_menu.add_separator()
+        file_menu.add_command(label="Export vehicle...", command=self._export_vehicle)
+        self.file_selected_button.configure(menu=file_menu)
+        self.file_selected_button.pack(side="left", padx=6)
         ttk.Button(
             actions,
             text="BUILD & INSTALL  >",
@@ -602,8 +637,270 @@ class GarageApp(tk.Tk):
 
     def _update_garage_actions(self) -> None:
         state = ["!disabled"] if self.tree.selection() else ["disabled"]
-        for button in (self.edit_selected_button, self.toggle_selected_button, self.delete_selected_button):
+        for button in (self.edit_selected_button, self.toggle_selected_button, self.delete_selected_button, self.file_selected_button):
             button.state(state)
+
+    def _refresh_garage_picker(self) -> None:
+        self.garage_picker.configure(values=[name for _, name in self.garages.entries()])
+        self.garage_picker.set(self.garages.active_name)
+        if hasattr(self, "garage_collection_button"):
+            self.garage_collection_button.config(text=self._garage_collection_label())
+
+    def _garage_collection_label(self) -> str:
+        name = self.garages.active_name
+        return "Garage: " + (name if len(name) <= 24 else name[:21] + "...")
+
+    def _activate_garage(self, garage_id: str) -> None:
+        self.garages.select(garage_id)
+        self.library = self.garages.library()
+        self._refresh_garage_picker()
+        self._refresh_garage()
+        if hasattr(self, "install_summary"):
+            self.build_collection.set("garage")
+            self.fit_garage_names.set(self.garages.fit_names())
+            self._refresh_install_summary()
+
+    def _choose_garage(self, _event=None) -> None:
+        chosen = self.garage_picker.get()
+        garage_id = next((key for key, name in self.garages.entries() if name == chosen), None)
+        if garage_id is None:
+            self._refresh_garage_picker()
+            messagebox.showerror("Choose garage", "The selected garage no longer exists.", parent=self)
+            return
+        try:
+            self._activate_garage(garage_id)
+        except (OSError, ValueError) as err:
+            self._refresh_garage_picker()
+            messagebox.showerror("Choose garage", str(err), parent=self)
+
+    def _manage_garages(self) -> None:
+        window = tk.Toplevel(self)
+        window.title("Manage garages")
+        window.transient(self)
+        window.geometry("600x420")
+        window.configure(background=COLORS["background"])
+        frame = ttk.Frame(window, style="App.TFrame", padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="YOUR GARAGES", style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="Each garage is independent. Select one to manage it.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(4, 8))
+        actions = ttk.Frame(frame, style="App.TFrame")
+        actions.pack(side="bottom", fill="x", pady=(8, 0))
+        listing = tk.Listbox(frame, exportselection=False, background=COLORS["panel"],
+                             foreground=COLORS["text"], selectbackground=COLORS["selected"])
+        listing.pack(fill="both", expand=True)
+        entries: list[tuple[str, str]] = []
+
+        def refresh(selected: str | None = None) -> None:
+            entries[:] = self.garages.entries()
+            listing.delete(0, "end")
+            for index, (garage_id, name) in enumerate(entries):
+                suffix = "  (current)" if garage_id == self.garages.active_id else ""
+                listing.insert("end", name + suffix)
+                if garage_id == (selected or self.garages.active_id):
+                    listing.selection_set(index)
+                    listing.see(index)
+            self._refresh_garage_picker()
+
+        def selected() -> str | None:
+            selection = listing.curselection()
+            return entries[selection[0]][0] if selection else None
+
+        def ask_name(title: str, initial: str = "") -> str | None:
+            return simpledialog.askstring(title, "Garage name:", initialvalue=initial, parent=window)
+
+        def run(action) -> None:
+            try:
+                action()
+            except (OSError, ValueError) as err:
+                messagebox.showerror("Manage garages", str(err), parent=window)
+
+        def create() -> None:
+            name = ask_name("New garage")
+            if name is not None:
+                def save():
+                    garage_id = self.garages.create(name)
+                    self._activate_garage(garage_id)
+                    refresh(garage_id)
+                run(save)
+
+        def rename() -> None:
+            garage_id = selected()
+            if garage_id is None:
+                return
+            name = ask_name("Rename garage", self.garages.name(garage_id))
+            if name is not None:
+                def save():
+                    self.garages.rename(garage_id, name)
+                    self._refresh_garage_picker()
+                    if hasattr(self, "install_summary"):
+                        self._refresh_install_summary()
+                    refresh(garage_id)
+                run(save)
+
+        def duplicate(onny: bool = False) -> None:
+            garage_id = selected()
+            if onny:
+                initial = "OnnY's Customs"
+            elif garage_id is not None:
+                initial = self.garages.name(garage_id) + " copy"
+            else:
+                return
+            name = ask_name("Copy garage", initial)
+            if name is not None:
+                def save():
+                    if onny:
+                        items = presets.creations(None if OFFICIAL_RELEASE else self.root_dir)
+                        fit_names = True
+                    elif garage_id is not None:
+                        items = self.garages.library(garage_id).all()
+                        fit_names = self.garages.fit_names(garage_id)
+                    else:
+                        raise ValueError("Choose a garage to duplicate.")
+                    new_id = self.garages.create(name, items, fit_names=fit_names)
+                    self._activate_garage(new_id)
+                    refresh(new_id)
+                run(save)
+
+        def delete() -> None:
+            garage_id = selected()
+            if garage_id is None:
+                return
+            name = self.garages.name(garage_id)
+            if not messagebox.askyesno("Delete garage", f"Delete '{name}' and its saved vehicles?\n"
+                                      "Other garages and installed mods are not changed.", parent=window):
+                return
+            def remove():
+                try:
+                    self.garages.delete(garage_id)
+                finally:
+                    self.library = self.garages.library()
+                    self._refresh_garage()
+                    self._refresh_garage_picker()
+                    if hasattr(self, "install_summary"):
+                        self.fit_garage_names.set(self.garages.fit_names())
+                        self._refresh_install_summary()
+                    refresh()
+            run(remove)
+
+        def use() -> None:
+            garage_id = selected()
+            if garage_id is not None:
+                def activate():
+                    self._activate_garage(garage_id)
+                    window.destroy()
+                run(activate)
+
+        for text, command in (("NEW", create), ("RENAME", rename), ("DUPLICATE", duplicate),
+                              ("COPY ONNY'S", lambda: duplicate(True)), ("DELETE", delete), ("USE", use)):
+            ttk.Button(actions, text=text, style="Secondary.TButton", command=command).pack(side="left", padx=(0, 4))
+        listing.bind("<Double-1>", lambda _event: use())
+        refresh()
+
+    def _file_selected(self, move: bool) -> None:
+        creation = self._selected_creation()
+        if creation is None:
+            return
+        entries = [(key, name) for key, name in self.garages.entries() if key != self.garages.active_id]
+        if not entries:
+            messagebox.showinfo("File vehicle", "Create another garage first.", parent=self)
+            return
+        window = tk.Toplevel(self)
+        window.title("Move vehicle" if move else "Copy vehicle")
+        window.transient(self)
+        window.configure(background=COLORS["background"])
+        frame = ttk.Frame(window, style="App.TFrame", padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=f"Choose a garage for {creation.name}:", style="App.TLabel").pack(anchor="w")
+        target = ttk.Combobox(frame, values=[name for _, name in entries], state="readonly", width=32)
+        target.current(0)
+        target.pack(fill="x", pady=10)
+
+        def apply() -> None:
+            index = target.current()
+            if not 0 <= index < len(entries):
+                return
+            try:
+                _, conflict = self.garages.file_vehicle(creation, entries[index][0], move=move)
+            except (OSError, ValueError) as err:
+                messagebox.showerror("File vehicle", str(err), parent=window)
+                return
+            window.destroy()
+            self._refresh_garage()
+            if conflict:
+                messagebox.showinfo("Vehicle filed", "The destination already uses that slot. "
+                                    "The filed vehicle was excluded from its mod.", parent=self)
+
+        ttk.Button(frame, text="MOVE" if move else "COPY", style="Primary.TButton", command=apply).pack(anchor="e")
+
+    def _save_garage_file(self, name: str, items: list[Creation], *, vehicle: bool = False) -> None:
+        try:
+            initial = self.settings.picker_folder("garage_export")
+        except OSError as err:
+            messagebox.showerror("Export", str(err), parent=self)
+            return
+        chosen = filedialog.asksaveasfilename(
+            parent=self, title="Export vehicle" if vehicle else "Export garage",
+            initialdir=str(initial), initialfile="vehicle.json" if vehicle else "garage.json",
+            defaultextension=".json", filetypes=[("Garage files", "*.json")],
+        )
+        if not chosen:
+            return
+        try:
+            garages.export_file(Path(chosen), name, items, vehicle=vehicle,
+                                fit_names=self.garages.fit_names() if not vehicle else False)
+        except (OSError, ValueError) as err:
+            messagebox.showerror("Export failed", str(err), parent=self)
+            return
+        try:
+            self.settings.remember_folder("garage_export", chosen, True, self.root_dir)
+        except OSError as err:
+            messagebox.showwarning("Remember folder", f"Export succeeded, but its folder could not be saved: {err}", parent=self)
+        messagebox.showinfo("Export complete", "Exported stats and texture references, not texture or game files.", parent=self)
+
+    def _export_garage(self) -> None:
+        self._save_garage_file(self.garages.active_name, self.library.all())
+
+    def _export_vehicle(self) -> None:
+        creation = self._selected_creation()
+        if creation is not None:
+            self._save_garage_file(creation.name, [creation], vehicle=True)
+
+    def _import_garage_file(self) -> None:
+        chosen = self._choose_path("garage_import", is_file=True, title="Import garage or vehicle",
+                                   filetypes=[("Garage and preset files", "*.json"), ("All files", "*.*")])
+        if not chosen:
+            return
+        try:
+            kind, name, items, fit_names = garages.import_file(Path(chosen))
+            missing = garages.missing_textures(items, texture_dir(self.root_dir))
+        except (OSError, ValueError) as err:
+            messagebox.showerror("Import failed", str(err), parent=self)
+            return
+        if kind in ("garage", "presets"):
+            name = simpledialog.askstring("Import garage", "Name for the new garage:", initialvalue=name, parent=self)
+            if name is None:
+                return
+            try:
+                garage_id = self.garages.create(name, items, fit_names=fit_names)
+                self._activate_garage(garage_id)
+            except (OSError, ValueError) as err:
+                messagebox.showerror("Import failed", str(err), parent=self)
+                return
+            detail = f"Imported {len(items)} vehicle(s) into {name.strip()}."
+        else:
+            try:
+                _, conflict = self.garages.add_vehicle(items[0])
+            except (OSError, ValueError) as err:
+                messagebox.showerror("Import failed", str(err), parent=self)
+                return
+            self._refresh_garage()
+            detail = f"Imported {items[0].name} into {self.garages.active_name}."
+            if conflict:
+                detail += "\nThe slot is already used, so the imported vehicle is excluded."
+        if missing:
+            detail += "\n\nTexture files are not included or failed their checksum. Re-import the textures for: " + ", ".join(missing)
+        messagebox.showinfo("Import complete", detail, parent=self)
 
     def _toggle_selected(self) -> None:
         creation = self._selected_creation()
@@ -830,6 +1127,14 @@ class GarageApp(tk.Tk):
         self.save_vehicle_button.pack(side="right")
         self.save_vehicle_button.state(["disabled"])
 
+        self.advanced_open = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            page,
+            text="SHOW ADVANCED GAME VALUES",
+            variable=self.advanced_open,
+            command=self._toggle_advanced,
+        ).pack(side="bottom", anchor="w", pady=(8, 0))
+
         scroll_area = ttk.Frame(page, style="App.TFrame")
         scroll_area.pack(fill="both", expand=True)
         self.editor_canvas = tk.Canvas(scroll_area, background=COLORS["background"], highlightthickness=0)
@@ -952,13 +1257,6 @@ class GarageApp(tk.Tk):
                 background=COLORS["panel"],
             ).grid(row=row, column=4, sticky="w", padx=8)
         bars.columnconfigure(1, weight=1)
-        self.advanced_open = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            content,
-            text="SHOW ADVANCED GAME VALUES",
-            variable=self.advanced_open,
-            command=self._toggle_advanced,
-        ).pack(anchor="w")
         self.advanced_frame = ttk.LabelFrame(
             content,
             text="  ADVANCED STATS  ",
@@ -966,16 +1264,38 @@ class GarageApp(tk.Tk):
             style="Panel.TLabelframe",
         )
         self.advanced_vars: dict[str, tk.StringVar] = {}
+        self.advanced_slider_vars: dict[str, tk.DoubleVar] = {}
+        self.advanced_sliders: dict[str, ttk.Scale] = {}
+        self._advanced_ranges: dict[str, tuple[float, float]] = {}
+        self._syncing_advanced = False
         for i, (field, label, hint) in enumerate(ADVANCED_FIELDS):
             var = tk.StringVar()
             self.advanced_vars[field] = var
             row, column = divmod(i, 2)
-            label_widget = ttk.Label(self.advanced_frame, text=label, width=27, style="Panel.TLabel")
-            label_widget.grid(row=row, column=column * 2, sticky="w", pady=2)
+            label_widget = ttk.Label(self.advanced_frame, text=label, width=23, style="Panel.TLabel")
+            label_widget.grid(row=row, column=column * 3, sticky="w", pady=2)
+            slider_var = tk.DoubleVar(value=0.0)
+            self.advanced_slider_vars[field] = slider_var
+            slider = ttk.Scale(
+                self.advanced_frame, from_=0, to=1, variable=slider_var, length=110,
+                command=lambda _value, f=field: self._advanced_moved(f),
+            )
+            slider.grid(row=row, column=column * 3 + 1, sticky="ew", padx=(0, 6), pady=2)
+            self.advanced_sliders[field] = slider
             entry = ttk.Entry(self.advanced_frame, textvariable=var, width=12)
-            entry.grid(row=row, column=column * 2 + 1, padx=(2, 18), pady=2)
-            for widget in (label_widget, entry):
-                ToolTip(widget, lambda f=field, h=hint: self._stat_tooltip(f, h))
+            entry.grid(row=row, column=column * 3 + 2, padx=(0, 12), pady=2)
+            entry.bind("<Return>", lambda _event, f=field, name=label: self._numeric_advanced_edited(f, name))
+            entry.bind("<FocusOut>", lambda _event, f=field, name=label: self._numeric_advanced_edited(f, name))
+            for widget in (label_widget, slider, entry):
+                ToolTip(widget, lambda f=field, h=hint: self._advanced_tooltip(f, h))
+        self.advanced_frame.columnconfigure(1, weight=1)
+        self.advanced_frame.columnconfigure(4, weight=1)
+
+    def _advanced_tooltip(self, field: str, hint: str) -> str:
+        limits = self._advanced_ranges.get(field)
+        if limits is None:
+            return self._stat_tooltip(field, hint)
+        return self._stat_tooltip(field, hint, *limits)
 
     def _stat_tooltip(self, field: str, hint: str, low=None, high=None) -> str:
         text = hint
@@ -1013,12 +1333,10 @@ class GarageApp(tk.Tk):
         self.show_page("vehicles")
 
     def _cancel_editing(self) -> None:
-        was_preset = self._preset_edit_slot is not None
-        self._preset_edit_slot = None
         self.editing = None
         self._changing_stock_vehicle = False
         self._refresh_garage()
-        self.show_page("install" if was_preset else "garage")
+        self.show_page("garage")
 
     def _browse_textures(self) -> None:
         slot = self._current_slot()
@@ -1077,9 +1395,46 @@ class GarageApp(tk.Tk):
             self._set_bar_value(bar, value, slot)
         for field, _label, _hint in ADVANCED_FIELDS:
             value = overrides.get(field, self._stock_value(slot, field))
+            values = [vehicle.get(field) for vehicle in self.stock.vehicles]
+            low, high = advanced_slider_range(field, values)
+            self._advanced_ranges[field] = (low, high)
+            self._syncing_advanced = True
+            try:
+                self.advanced_sliders[field].configure(from_=low, to=high)
+            finally:
+                self._syncing_advanced = False
+            self._set_advanced_value(field, value)
+
+    def _set_advanced_value(self, field: str, value: float) -> None:
+        low, high = self._advanced_ranges[field]
+        self._syncing_advanced = True
+        try:
+            self.advanced_slider_vars[field].set(max(low, min(high, value)))
             shown = format_value(value)
             self._advanced_values[field] = (shown, value)
             self.advanced_vars[field].set(shown)
+        finally:
+            self._syncing_advanced = False
+
+    def _advanced_moved(self, field: str) -> None:
+        if self._syncing_advanced or self._current_slot() is None:
+            return
+        value = self.advanced_slider_vars[field].get()
+        shown = format_value(value)
+        self._advanced_values[field] = (shown, value)
+        self.advanced_vars[field].set(shown)
+
+    def _numeric_advanced_edited(self, field: str, label: str) -> None:
+        if self._current_slot() is None:
+            return
+        try:
+            text = self.advanced_vars[field].get().strip()
+            shown, original = self._advanced_values[field]
+            value = parse_advanced_value(str(original) if text == shown else text, label)
+        except ValueError as err:
+            messagebox.showwarning("Check the stat value", str(err))
+            return
+        self._set_advanced_value(field, value)
 
     def _set_bar_value(self, bar, value, slot: int) -> None:
         self._syncing_bar = True
@@ -1116,10 +1471,7 @@ class GarageApp(tk.Tk):
         if slot is not None:
             self._set_bar_value(bar, value, slot)
 
-    def _start_editing(self, creation: Creation | None, slot: int | None = None, *, preset: bool = False) -> None:
-        self._preset_edit_slot = creation.slot if preset and creation else None
-        if preset:
-            self._changing_stock_vehicle = False
+    def _start_editing(self, creation: Creation | None, slot: int | None = None) -> None:
         self.editing = creation
         if slot is None:
             slot = creation.slot if creation else (self.selected_slot if self.selected_slot is not None else 0)
@@ -1135,19 +1487,11 @@ class GarageApp(tk.Tk):
         self.name_var.set(creation.name if creation else "")
         self._update_name_counter()
         self.number_label.config(text=(
-            "ONNY'S CUSTOM VEHICLES DRAFT" if preset else
             f"#{creation.number}" if creation and creation.number > 0 else f"#{self.library.next_number()} (new)"
         ))
-        self.save_vehicle_button.config(text="SAVE PRESET" if preset else "SAVE VEHICLE")
-        self.editor_back_button.config(text="< BACK TO INSTALL" if preset else "< BACK TO GARAGE")
-        state = ["disabled"] if preset else ["!disabled"]
-        self.browse_texture_button.state(state)
-        self.change_stock_button.state(state)
         overrides = creation.stats if creation and creation.slot == slot else {}
         self._load_values(slot, overrides)
         self._refresh_texture_label()
-        if preset:
-            self.texture_label.config(text="Preset editing supports stats and names only; textures stay in My Garage.")
         self.show_page("editor")
 
     def _reset_to_stock(self) -> None:
@@ -1155,27 +1499,21 @@ class GarageApp(tk.Tk):
         if slot is not None:
             self._load_values(slot, {})
 
-    def _collect_stats(self, slot: int, preserve_fields: set[str] | None = None) -> dict:
+    def _collect_stats(self, slot: int) -> dict:
         stats: dict = {}
-        preserve_fields = preserve_fields or set()
         for bar in BARS:
             text = self.bar_value_vars[bar.key].get().strip()
             shown, original = self._bar_values[bar.key]
             value = original if text == shown else bar.parse_value(text)
             stock = self._stock_value(slot, bar.field)
-            if bar.field in preserve_fields or (value != stock if bar.is_int else not same_game_value(value, stock)):
+            if (value != stock if bar.is_int else not same_game_value(value, stock)):
                 stats[bar.field] = value
         for field, label, _hint in ADVANCED_FIELDS:
             text = self.advanced_vars[field].get().strip()
-            try:
-                shown, original = self._advanced_values[field]
-                value = original if text == shown else float(text)
-            except ValueError:
-                raise ValueError(f"{label} must be a number, got '{text}'") from None
-            if not math.isfinite(value) or abs(value) > 3.402823466e38:
-                raise ValueError(f"{label} must be a finite 32-bit float")
+            shown, original = self._advanced_values[field]
+            value = parse_advanced_value(str(original) if text == shown else text, label)
             stock = self._stock_value(slot, field)
-            if field in preserve_fields or not same_game_value(value, stock):
+            if not same_game_value(value, stock):
                 stats[field] = value
         return stats
 
@@ -1195,28 +1533,9 @@ class GarageApp(tk.Tk):
             )
             return
         try:
-            if self._preset_edit_slot is not None:
-                if OFFICIAL_RELEASE or slot != self._preset_edit_slot or self.edit_texture is not None:
-                    raise ValueError("This preset must keep its original stock vehicle and cannot include a texture.")
-                fields = {bar.field for bar in BARS}
-                if self.editing:
-                    fields.update(self.editing.stats)
-                stats = self._collect_stats(slot, fields)
-            else:
-                stats = self._collect_stats(slot)
+            stats = self._collect_stats(slot)
         except ValueError as err:
             messagebox.showwarning("Check the stats", str(err))
-            return
-        if self._preset_edit_slot is not None:
-            try:
-                presets.save_draft(self.root_dir, Creation(name=name, stats=stats, slot=slot))
-            except (OSError, ValueError) as err:
-                messagebox.showerror("Save preset failed", str(err))
-                return
-            self._preset_edit_slot = None
-            self.editing = None
-            self._refresh_install_summary()
-            self.show_page("install")
             return
         number = self.editing.number if self.editing else 0
         creation = Creation(name=name, stats=stats, slot=slot, number=number, enabled=self.editing.enabled if self.editing else True, texture=self.edit_texture)
@@ -1237,7 +1556,17 @@ class GarageApp(tk.Tk):
     # ---------- install page ----------
 
     def _build_install_page(self) -> None:
-        page = self._new_page("install")
+        outer = self._new_page("install")
+        canvas = tk.Canvas(outer, background=COLORS["background"], highlightthickness=0, borderwidth=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        page = ttk.Frame(canvas, style="App.TFrame")
+        content_window = canvas.create_window((0, 0), window=page, anchor="nw")
+        page.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(content_window, width=event.width))
+        canvas.bind("<MouseWheel>", lambda event: canvas.yview_scroll(-int(event.delta / 120), "units"))
         ttk.Label(page, text="BUILD & INSTALL", style="PageTitle.TLabel").pack(anchor="w")
         ttk.Label(
             page,
@@ -1249,10 +1578,11 @@ class GarageApp(tk.Tk):
         collection.pack(fill="x", pady=(0, 8))
         default_collection = self.settings.build_collection or ("garage" if self.library.all() else "onny")
         self.build_collection = tk.StringVar(value=default_collection)
-        ttk.Radiobutton(
-            collection, text="My Garage", variable=self.build_collection, value="garage",
+        self.garage_collection_button = ttk.Radiobutton(
+            collection, text=self._garage_collection_label(), variable=self.build_collection, value="garage",
             command=self._refresh_install_summary,
-        ).pack(side="left", padx=(0, 18))
+        )
+        self.garage_collection_button.pack(side="left", padx=(0, 18))
         ttk.Radiobutton(
             collection, text="OnnY's Custom Vehicles (36)", variable=self.build_collection, value="onny",
             command=self._refresh_install_summary,
@@ -1260,6 +1590,13 @@ class GarageApp(tk.Tk):
         ttk.Button(
             collection, text="VIEW EXAMPLES", style="Secondary.TButton", command=self._show_presets,
         ).pack(side="right")
+        name_options = ttk.Frame(page, style="App.TFrame")
+        name_options.pack(fill="x", pady=(0, 8))
+        self.fit_garage_names = tk.BooleanVar(value=self.garages.fit_names())
+        ttk.Checkbutton(
+            name_options, text="Shorten garage vehicle names if needed to fit the game",
+            variable=self.fit_garage_names, command=self._save_fit_names,
+        ).pack(anchor="w")
 
         self.folders = dolphin.find_folders(
             Path(self.settings.dolphintool).with_name("Dolphin.exe") if self.settings.dolphintool else None
@@ -1317,7 +1654,7 @@ class GarageApp(tk.Tk):
         self.install_summary.pack(anchor="w", pady=(6, 0))
 
         actions = ttk.Frame(page, style="App.TFrame")
-        actions.pack(fill="x")
+        actions.pack(fill="x", before=collection, pady=(0, 8))
         self.build_button = ttk.Button(
             actions,
             text="BUILD & INSTALL MOD",
@@ -1346,7 +1683,7 @@ class GarageApp(tk.Tk):
             wraplength=900,
             justify="left",
         )
-        self.install_status.pack(anchor="w", pady=(8, 0))
+        self.install_status.pack(anchor="w", before=collection, pady=(0, 8))
         ttk.Label(
             page,
             justify="left",
@@ -1378,6 +1715,13 @@ class GarageApp(tk.Tk):
         if chosen:
             var.set(chosen)
 
+    def _save_fit_names(self) -> None:
+        try:
+            self.garages.set_fit_names(self.fit_garage_names.get())
+        except OSError as err:
+            self.fit_garage_names.set(self.garages.fit_names())
+            messagebox.showerror("Garage settings", str(err), parent=self)
+
     def _refresh_install_summary(self) -> None:
         if self.build_collection.get() == "onny":
             draft = "\nDevelopment draft will be used." if not OFFICIAL_RELEASE and (self.root_dir / presets.DRAFT_FILE).is_file() else ""
@@ -1389,10 +1733,14 @@ class GarageApp(tk.Tk):
             return
         active = [c for c in self.library.all() if c.enabled]
         if active:
-            lines = [f"{len(active)} creation(s) will be installed:"]
-            lines += [f"   #{c.number} {c.name}  ->  replaces {VEHICLES[c.slot].name}" for c in active]
+            lines = [f"{self.garages.active_name}: {len(active)} creation(s) will be installed:"]
+            lines += [f"   #{c.number} {c.name}  ->  replaces {VEHICLES[c.slot].name}" for c in active[:6]]
+            if len(active) > 6:
+                lines.append(f"   ... and {len(active) - 6} more.")
         else:
-            lines = ["No creations are included yet. Add a vehicle in My Garage before installing."]
+            lines = [f"{self.garages.active_name}: no creations are included yet."]
+        if self.garages.fit_names():
+            lines.append("Vehicle names may be shortened to fit your game.")
         self.install_summary.config(text="\n".join(lines))
 
     def _show_presets(self) -> None:
@@ -1410,7 +1758,7 @@ class GarageApp(tk.Tk):
         ttk.Label(frame, text="ONNY'S CUSTOM VEHICLES", style="PageTitle.TLabel").pack(anchor="w")
         ttk.Label(
             frame, text=(
-                "Development draft: edit presets or export the collection. Names may be shortened to fit your game."
+                "Development collection: edit a garage copy. Names may be shortened to fit your game."
                 if not OFFICIAL_RELEASE else
                 "Use this collection instead of My Garage, or edit a copy. Names may be shortened to fit your game."
             ),
@@ -1431,28 +1779,20 @@ class GarageApp(tk.Tk):
         for creation in items:
             listing.insert("end", f"{creation.name}  |  replaces {VEHICLES[creation.slot].name}")
 
-        def edit_selected(direct: bool) -> None:
+        def edit_selected() -> None:
             selected = listing.curselection()
             if not selected or not self._require_stock():
                 return
             creation = items[selected[0]]
             window.destroy()
-            self._start_editing(creation, preset=direct)
+            self._start_editing(creation)
 
-        edit_copy = ttk.Button(buttons, text="EDIT GARAGE COPY", style="Secondary.TButton", command=lambda: edit_selected(False))
+        edit_copy = ttk.Button(buttons, text="EDIT GARAGE COPY", style="Secondary.TButton", command=edit_selected)
         edit_copy.pack(side="left")
-        edit_buttons = [edit_copy]
-        if not OFFICIAL_RELEASE:
-            edit_draft = ttk.Button(buttons, text="EDIT PRESET", style="Primary.TButton", command=lambda: edit_selected(True))
-            edit_draft.pack(side="left", padx=6)
-            edit_buttons.append(edit_draft)
-            ttk.Button(buttons, text="EXPORT JSON", style="Secondary.TButton", command=self._export_presets).pack(side="right")
-        for button in edit_buttons:
-            button.state(["disabled"])
+        edit_copy.state(["disabled"])
 
         def selected(_event) -> None:
-            for button in edit_buttons:
-                button.state(["!disabled"] if listing.curselection() else ["disabled"])
+            edit_copy.state(["!disabled"] if listing.curselection() else ["disabled"])
 
         listing.bind("<<ListboxSelect>>", selected)
 
@@ -1460,7 +1800,12 @@ class GarageApp(tk.Tk):
         if OFFICIAL_RELEASE:
             return
         try:
-            items = presets.creations(self.root_dir)
+            garage_items = self.library.all()
+            used_stock = any(
+                item.enabled and any(bar.field not in item.stats for bar in BARS)
+                for item in garage_items
+            )
+            items = presets.from_garage(garage_items, self.stock)
             initial = self.settings.picker_folder("preset_export")
         except (OSError, ValueError) as err:
             messagebox.showerror("Export presets", str(err))
@@ -1481,7 +1826,12 @@ class GarageApp(tk.Tk):
             self.settings.remember_folder("preset_export", chosen, True, self.root_dir)
         except OSError as err:
             messagebox.showwarning("Remember folder", f"Preset export succeeded, but its folder could not be saved: {err}")
-        messagebox.showinfo("Preset export", f"Exported all 36 presets to:\n{chosen}")
+        messagebox.showinfo(
+            "Preset export",
+            f"Exported all 36 presets to:\n{chosen}\n\n"
+            + ("Unchanged performance values were taken from your imported game data.\n\n" if used_stock else "")
+            + "To update a future release, replace the bundled onny-presets.json with this file and run the tests.",
+        )
 
     def _install_targets(self) -> list[Path]:
         targets = []
@@ -1561,6 +1911,7 @@ class GarageApp(tk.Tk):
         if slot_conflicts(creations):
             messagebox.showwarning("Conflict", "Two included creations replace the same vehicle. Fix that in My Garage first.")
             return
+        fit_names = collection == "onny" or (collection == "garage" and self.fit_garage_names.get())
         targets = self._install_targets()
         if play and self.folders.riivolution not in targets:
             targets.insert(0, self.folders.riivolution)
@@ -1607,9 +1958,10 @@ class GarageApp(tk.Tk):
             cancel.check()
             shortened = []
             build_creations = creations
-            if collection == "onny":
-                progress("Checking preset names...", 0)
-                build_creations, shortened = presets.fit_names(creations, self.cache / game, game, cancel.check)
+            if fit_names:
+                progress("Checking vehicle names...", 0)
+                active = [creation for creation in creations if creation.enabled]
+                build_creations, shortened = presets.fit_names(active, self.cache / game, game, cancel.check)
             if play:
                 imported_game = disc.read_game_id(tool, image)
                 if imported_game != game:
@@ -1637,7 +1989,7 @@ class GarageApp(tk.Tk):
                 self.progress.config(value=100)
                 prefix = "Launched Dolphin. Installed into:\n" if play else "Done. Installed into:\n"
                 targets_done, shortened = result
-                names = "\nShortened preset names: " + ", ".join(shortened) if shortened else ""
+                names = "\nShortened vehicle names: " + ", ".join(shortened) if shortened else ""
                 self.install_status.config(text=prefix + "\n".join(str(p) for p in targets_done) + names)
 
         self._run_in_background(work, done)

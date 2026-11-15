@@ -10,7 +10,7 @@ from pathlib import Path
 from vehiclegarage import bmg, disc, u8, yaz0
 from vehiclegarage.creations import Creation
 from vehiclegarage.export import VEHICLE_NAME_BMG_PATH
-from vehiclegarage.kartparam import FIELD_INDEX, _INT_FIELDS
+from vehiclegarage.kartparam import FIELD_INDEX, _INT_FIELDS, KartParam
 from vehiclegarage.stats import ADVANCED_FIELDS, BARS
 from vehiclegarage.vehicles import VEHICLES
 
@@ -90,13 +90,36 @@ def write(path: Path, items: list[Creation]) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-def save_draft(root: Path, item: Creation) -> None:
-    items = creations(root)
-    if type(item.slot) is not int or not 0 <= item.slot < len(items):
-        raise ValueError("Invalid preset slot.")
-    items[item.slot] = item
-    root.mkdir(parents=True, exist_ok=True)
-    write(root / DRAFT_FILE, items)
+def from_garage(items: list[Creation], stock: KartParam | None) -> list[Creation]:
+    active = [item for item in items if item.enabled]
+    slots: dict[int, Creation] = {}
+    for item in active:
+        if type(item.slot) is not int or not 0 <= item.slot < len(VEHICLES):
+            raise ValueError(f"{item.name}: invalid vehicle slot.")
+        if item.slot in slots:
+            raise ValueError(f"More than one included vehicle uses {VEHICLES[item.slot].name}.")
+        slots[item.slot] = item
+    missing_slots = [vehicle.name for vehicle in VEHICLES if vehicle.slot not in slots]
+    if missing_slots:
+        raise ValueError("Include one vehicle for each stock slot. Missing: " + ", ".join(missing_slots))
+    result = []
+    for slot in range(len(VEHICLES)):
+        item = slots[slot]
+        if item.texture is not None:
+            raise ValueError(f"{item.name}: presets cannot include textures; remove the texture before exporting.")
+        unsupported = item.stats.keys() - _EDITABLE_FIELDS
+        if unsupported:
+            raise ValueError(f"{item.name}: unsupported preset stats: {', '.join(sorted(unsupported))}.")
+        stats = dict(item.stats)
+        missing_fields = _BAR_FIELDS - stats.keys()
+        if missing_fields:
+            if stock is None or len(stock.vehicles) != len(VEHICLES):
+                raise ValueError("Import game data first to fill in unchanged stock stats for the presets.")
+            for field in missing_fields:
+                stats[field] = stock.vehicles[slot].get(field)
+        result.append(Creation(name=item.name, slot=slot, stats=stats))
+    _validate(result)
+    return result
 
 
 def fit_names(items: list[Creation], cache_game: Path, game_id: str, check) -> tuple[list[Creation], list[str]]:
