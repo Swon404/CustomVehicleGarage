@@ -61,6 +61,9 @@ class VehicleSelectionLayoutTests(unittest.TestCase):
                 patch.object(GarageApp, "_check_update"):
             app = GarageApp(Path(tmp))
             try:
+                self.assertIs(app.app_icon.tk, app.tk)
+                self.assertIs(app.header_icon.tk, app.tk)
+                self.assertIs(app.header_art.tk, app.tk)
                 app.library.save(Creation("Saved vehicle", slot=0))
                 app.show_page("vehicles")
                 app._fill_vehicles()

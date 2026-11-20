@@ -238,7 +238,7 @@ class TextureBrowser(tk.Toplevel):
                     self.direct_button.state(["!disabled"])
             if image_data:
                 try:
-                    self.image = tk.PhotoImage(data=image_data)
+                    self.image = tk.PhotoImage(master=self, data=image_data)
                     self.preview_label.config(image=self.image, text="")
                 except tk.TclError as err:
                     image_error = str(err)

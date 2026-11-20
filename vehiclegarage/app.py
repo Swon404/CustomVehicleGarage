@@ -78,13 +78,13 @@ class GarageApp(tk.Tk):
         self.configure(background=COLORS["background"])
         self._configure_styles()
         assets = Path(__file__).resolve().parent / "assets"
-        self.app_icon = tk.PhotoImage(file=str(assets / "garage.png"))
+        self.app_icon = tk.PhotoImage(master=self, file=str(assets / "garage.png"))
         if os.name == "nt":
             self.iconbitmap(default=str(assets / "garage.ico"))
         else:
             self.iconphoto(True, self.app_icon)
         self.header_icon = self.app_icon.subsample(5, 5)
-        self.header_art = tk.PhotoImage(file=str(assets / "racing-banner.png"))
+        self.header_art = tk.PhotoImage(master=self, file=str(assets / "racing-banner.png"))
         self.root_dir = root_dir or data_dir()
         self.settings = Settings.load(self.root_dir)
         self.garages = garages.Garages(self.root_dir)
