@@ -56,6 +56,10 @@ Save the vehicle after importing, then build the mod. Imported files are kept in
 
 Official release builds check GitHub when they start and show **Update** only if a newer release is available. If you agree, the Windows executable is downloaded, checked against GitHub's SHA-256 asset digest, replaced, and restarted. Save any edits first. Creations and game data stay in the app's data folder. Source, locally built and pull-request builds are labelled development builds and do not offer automatic updates, which could replace unpublished work with an older release. Versions with the previous broken updater need a one-time manual download of a newer executable from GitHub Releases.
 
+Download the [latest Windows release](https://github.com/Swon404/CustomVehicleGarage/releases/latest/download/CustomVehicleGarage.exe). If your app does not show an update, download and run this executable manually; older builds cannot update themselves.
+
+Updating the executable does not remove garage data. On Windows, the app stores it under `%APPDATA%\CustomVehicleGarage`; existing creations in its `creations` folder remain **My Garage**. If the garage looks empty, first check that you are using the same Windows account as before and that this folder still contains your creation files. On first startup with the newer garage system, those files are also backed up to `garage-migration-backup`.
+
 GitHub Actions tests and builds pushes to `main`. Successful builds of the current `main` commit publish a Windows release with version `0.<workflow run>.<attempt>`; a later run receives a higher version. Pull requests are tested and built but not released. Pushing several commits together produces one build of the final commit, and a build superseded by a newer `main` commit is not published. Download the first update-capable executable from GitHub Releases; older builds cannot update themselves.
 
 ## Credits
