@@ -38,7 +38,7 @@ Existing creations stay in their original data folder as **My Garage**. On first
 
 ## Refining OnnY's Custom Vehicles
 
-OnnY's Custom Vehicles includes 36 strong, challenging and silly builds, including Feather, which is extremely light and fast. Some values exceed the normal slider ranges and their in-game effects have not been verified. Choose **Manage Garages > Copy Onny's**, edit the resulting garage normally, and build that garage to test your changes. Previously saved development drafts are still used in development builds and included when copying OnnY's; they are not modified or deleted.
+OnnY's Custom Vehicles includes 36 strong, challenging and silly builds, including Feather, which is extremely light and fast. Powerful presets are spread across the light, medium and heavy classes, for both karts and bikes. Some values exceed the normal slider ranges and their in-game effects have not been verified. Choose **Manage Garages > Copy Onny's**, edit the resulting garage normally, and build that garage to test your changes. Existing garage copies are independent and do not update automatically. Previously saved development drafts are still used in development builds and included when copying OnnY's; they are not modified or deleted.
 
 In a development build, select the garage and choose **Export > Export OnnY presets from this garage**. Include exactly one vehicle for each of the 36 stock slots; excluded alternatives are ignored. Presets do not support textures or non-editor stats, so remove these from included vehicles before export. Any unchanged performance values are filled from your imported game's stock data; import the game first if needed. The exported JSON contains names and stats, not game archives.
 

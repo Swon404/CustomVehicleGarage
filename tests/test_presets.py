@@ -15,6 +15,7 @@ from vehiclegarage.app import GarageApp
 from vehiclegarage.creations import Creation
 from vehiclegarage.kartparam import KartParam
 from vehiclegarage.machinepara import MachinePara
+from vehiclegarage.vehicles import VEHICLES
 
 
 def full_name_archive() -> bytes:
@@ -43,6 +44,23 @@ class PresetTests(unittest.TestCase):
         self.assertTrue(all(bmg.valid_vehicle_name(item.name) for item in examples))
         examples[0].stats["speed"] = 1
         self.assertNotEqual(presets.creations()[0].stats["speed"], 1)
+
+    def test_stronger_presets_are_shared_between_weight_classes_and_vehicle_types(self):
+        examples = presets.creations()
+        faster = {
+            "Feather", "Rocket", "Blaizing", "Vortex", "Phoenix", "Thunder",
+            "Cyclone", "Comet", "Falcon", "Meteor", "Quasar", "Nitro",
+        }
+        for weight_class in range(3):
+            for kind in ("Kart", "Bike"):
+                selected = [item for item in examples if item.name in faster
+                            and VEHICLES[item.slot].weight_class == weight_class
+                            and VEHICLES[item.slot].kind == kind]
+                self.assertEqual(len(selected), 2, (weight_class, kind))
+        by_name = {item.name: item for item in examples}
+        self.assertEqual(by_name["Vortex"].stats["drift_target_angle"], 90.0)
+        self.assertEqual(by_name["Jelly"].stats["accel_a1"], 1.75)
+        self.assertEqual(by_name["Poo"].stats["bump_deviation"], 40.0)
 
     def test_garage_conversion_is_consumable_as_bundled_collection(self):
         with tempfile.TemporaryDirectory() as tmp:
