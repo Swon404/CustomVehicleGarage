@@ -88,6 +88,10 @@ class UpdateTests(unittest.TestCase):
                 GarageApp._check_update(app)
                 self.assertEqual(app.update_button.pack.called, result is not None)
                 self.assertEqual(app.available_release, result)
+                if result is not None:
+                    app.update_button.config.assert_called_once_with(text="UPDATE TO LATEST")
+                else:
+                    app.update_button.config.assert_not_called()
 
     def test_development_build_does_not_offer_update(self):
         app = SimpleNamespace(update_status=Mock(), _run_in_background=Mock())

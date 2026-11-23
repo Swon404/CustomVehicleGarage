@@ -130,19 +130,17 @@
     },
     {
       "slot": 9,
-      "name": "Poo",
+      "name": "RandomTrolley",
       "stats": {
-        "speed": 66.12814465408805,
-        "weight": 7.5,
-        "accel_a0": 0.1233490566037736,
-        "manual_handling": 0.012044025157232704,
-        "manual_drift": 0.04,
-        "speed_multiplier_3": 0.026729559748427674,
-        "mini_turbo_duration": 60,
-        "bump_deviation": 40.0,
-        "drift_target_angle": 90.0,
-        "mega_mushroom_scale": 10.0,
-        "shock_scale": 10.0
+        "speed": 75.5935534591195,
+        "weight": 3.3113207547169807,
+        "accel_a0": 0.3702830188679245,
+        "manual_handling": 0.12,
+        "manual_drift": 0.08,
+        "speed_multiplier_3": 1.0,
+        "mini_turbo_duration": 13,
+        "mega_mushroom_scale": 0.1,
+        "shock_scale": 0.1
       }
     },
     {
@@ -163,17 +161,19 @@
     },
     {
       "slot": 11,
-      "name": "RandomTrolley",
+      "name": "Poo",
       "stats": {
-        "speed": 75.5935534591195,
-        "weight": 3.3113207547169807,
-        "accel_a0": 0.3702830188679245,
-        "manual_handling": 0.12,
-        "manual_drift": 0.08,
-        "speed_multiplier_3": 1.0,
-        "mini_turbo_duration": 13,
-        "mega_mushroom_scale": 0.1,
-        "shock_scale": 0.1
+        "speed": 66.12814465408805,
+        "weight": 7.5,
+        "accel_a0": 0.1233490566037736,
+        "manual_handling": 0.012044025157232704,
+        "manual_drift": 0.04,
+        "speed_multiplier_3": 0.026729559748427674,
+        "mini_turbo_duration": 60,
+        "bump_deviation": 40.0,
+        "drift_target_angle": 90.0,
+        "mega_mushroom_scale": 10.0,
+        "shock_scale": 10.0
       }
     },
     {
@@ -191,6 +191,19 @@
     },
     {
       "slot": 13,
+      "name": "Axelr8",
+      "stats": {
+        "speed": 96.5,
+        "weight": 15.0,
+        "accel_a0": 5.0,
+        "manual_handling": 0.0125,
+        "manual_drift": 0.0085,
+        "speed_multiplier_3": 0.05,
+        "mini_turbo_duration": 20
+      }
+    },
+    {
+      "slot": 14,
       "name": "Wobbler",
       "stats": {
         "speed": 75.5,
@@ -201,19 +214,6 @@
         "speed_multiplier_3": 0.2,
         "mini_turbo_duration": 22,
         "bump_deviation": 1.0
-      }
-    },
-    {
-      "slot": 14,
-      "name": "Axelr8",
-      "stats": {
-        "speed": 96.5,
-        "weight": 15.0,
-        "accel_a0": 5.0,
-        "manual_handling": 0.0125,
-        "manual_drift": 0.0085,
-        "speed_multiplier_3": 0.05,
-        "mini_turbo_duration": 20
       }
     },
     {
@@ -231,7 +231,7 @@
     },
     {
       "slot": 16,
-      "name": "Mudder",
+      "name": "Mudtrap",
       "stats": {
         "speed": 73.75,
         "weight": 2.1,
@@ -334,15 +334,28 @@
     },
     {
       "slot": 23,
-      "name": "Noodle",
+      "name": "Jelly",
       "stats": {
-        "speed": 87.75,
-        "weight": 1.5,
-        "accel_a0": 0.955,
-        "manual_handling": 0.0575,
-        "manual_drift": 0.006750000000000001,
-        "speed_multiplier_3": 0.1,
-        "mini_turbo_duration": 30
+        "speed": 65.0,
+        "weight": 7.5,
+        "accel_a0": 1.0,
+        "manual_handling": 0.01,
+        "manual_drift": 0.04,
+        "speed_multiplier_3": 0.0,
+        "mini_turbo_duration": 60,
+        "bump_deviation": 0.4000000059604645,
+        "speed_in_turn": 0.9900000095367432,
+        "tilt": 0.009999999776482582,
+        "accel_a1": 1.75,
+        "accel_a2": 0.5586000084877014,
+        "accel_a3": 0.031060000881552696,
+        "auto_handling": 0.019200000911951065,
+        "handling_reactivity": 1.0,
+        "auto_drift": 0.022199999541044235,
+        "drift_reactivity": 0.8100000023841858,
+        "drift_target_angle": 0.0,
+        "mega_mushroom_scale": 2.700000047683716,
+        "shock_scale": 0.4000000059604645
       }
     },
     {
@@ -386,28 +399,15 @@
     },
     {
       "slot": 27,
-      "name": "Jelly",
+      "name": "Noodle",
       "stats": {
-        "speed": 65.0,
-        "weight": 7.5,
-        "accel_a0": 1.0,
-        "manual_handling": 0.01,
-        "manual_drift": 0.04,
-        "speed_multiplier_3": 0.0,
-        "mini_turbo_duration": 60,
-        "bump_deviation": 0.4000000059604645,
-        "speed_in_turn": 0.9900000095367432,
-        "tilt": 0.009999999776482582,
-        "accel_a1": 1.75,
-        "accel_a2": 0.5586000084877014,
-        "accel_a3": 0.031060000881552696,
-        "auto_handling": 0.019200000911951065,
-        "handling_reactivity": 1.0,
-        "auto_drift": 0.022199999541044235,
-        "drift_reactivity": 0.8100000023841858,
-        "drift_target_angle": 0.0,
-        "mega_mushroom_scale": 2.700000047683716,
-        "shock_scale": 0.4000000059604645
+        "speed": 87.75,
+        "weight": 1.5,
+        "accel_a0": 0.955,
+        "manual_handling": 0.0575,
+        "manual_drift": 0.006750000000000001,
+        "speed_multiplier_3": 0.1,
+        "mini_turbo_duration": 30
       }
     },
     {
@@ -425,21 +425,6 @@
     },
     {
       "slot": 29,
-      "name": "Ant",
-      "stats": {
-        "speed": 98.37657232704403,
-        "weight": 1.5613207547169812,
-        "accel_a0": 1.0,
-        "manual_handling": 0.01,
-        "manual_drift": 0.005,
-        "speed_multiplier_3": 0.06682389937106918,
-        "mini_turbo_duration": 60,
-        "mega_mushroom_scale": 0.1,
-        "shock_scale": 0.01
-      }
-    },
-    {
-      "slot": 30,
       "name": "Tanky",
       "stats": {
         "speed": 73.39229559748428,
@@ -454,6 +439,21 @@
         "accel_a2": 0.31250770481733176,
         "accel_a3": 0.031060000881552696,
         "drift_reactivity": 0.9699385564448098
+      }
+    },
+    {
+      "slot": 30,
+      "name": "Ant",
+      "stats": {
+        "speed": 98.37657232704403,
+        "weight": 1.5613207547169812,
+        "accel_a0": 1.0,
+        "manual_handling": 0.01,
+        "manual_drift": 0.005,
+        "speed_multiplier_3": 0.06682389937106918,
+        "mini_turbo_duration": 60,
+        "mega_mushroom_scale": 0.1,
+        "shock_scale": 0.01
       }
     },
     {
@@ -520,7 +520,7 @@
     },
     {
       "slot": 35,
-      "name": "Drifter",
+      "name": "Spinout",
       "stats": {
         "speed": 84.25,
         "weight": 2.1,

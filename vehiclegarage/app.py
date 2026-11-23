@@ -346,7 +346,7 @@ class GarageApp(tk.Tk):
         self.nav_buttons["setup"].pack(side="right")
         self.update_button = ttk.Button(
             nav,
-            text="UPDATE AVAILABLE",
+            text="UPDATE TO LATEST",
             style="Nav.TButton",
             command=self._install_update,
         )
@@ -450,7 +450,7 @@ class GarageApp(tk.Tk):
                 self.update_status.config(text=f"v{VERSION}  |  Up to date")
             else:
                 self.available_release = release
-                self.update_button.config(text=f"UPDATE TO v{release.version}")
+                self.update_button.config(text="UPDATE TO LATEST")
                 self.update_button.pack(side="right", padx=(0, 7), before=self.nav_buttons["setup"])
                 self.update_status.config(text=f"v{VERSION}  |  Update available")
 

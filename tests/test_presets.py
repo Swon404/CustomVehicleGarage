@@ -31,7 +31,8 @@ class PresetTests(unittest.TestCase):
     def test_collection_covers_all_slots_and_returns_independent_creations(self):
         examples = presets.creations()
         self.assertEqual([item.slot for item in examples], list(range(36)))
-        self.assertEqual([item.slot for item in examples if item.name == "Drifter"], [17, 35])
+        self.assertEqual(len({item.name.casefold() for item in examples}), 36)
+        self.assertEqual(len({json.dumps(item.stats, sort_keys=True) for item in examples}), 36)
         self.assertGreater(examples[0].stats["speed"], examples[4].stats["speed"])
         self.assertEqual(examples[0].name, "Feather")
         self.assertGreaterEqual(examples[0].stats["speed"], 95)
@@ -45,22 +46,30 @@ class PresetTests(unittest.TestCase):
         examples[0].stats["speed"] = 1
         self.assertNotEqual(presets.creations()[0].stats["speed"], 1)
 
-    def test_stronger_presets_are_shared_between_weight_classes_and_vehicle_types(self):
+    def test_preset_mix_is_shared_between_weight_classes_and_vehicle_types(self):
         examples = presets.creations()
         faster = {
             "Feather", "Rocket", "Blaizing", "Vortex", "Phoenix", "Thunder",
             "Cyclone", "Comet", "Falcon", "Meteor", "Quasar", "Nitro",
         }
+        weaker = {
+            "Rust", "Clanker", "Poo", "Banana", "Snail", "Slugger", "Wobbler",
+            "Mudtrap", "CursedKart", "Brick", "Sheep", "Jelly", "Tanky",
+            "Handler", "TurtleHead",
+        }
         for weight_class in range(3):
             for kind in ("Kart", "Bike"):
-                selected = [item for item in examples if item.name in faster
-                            and VEHICLES[item.slot].weight_class == weight_class
-                            and VEHICLES[item.slot].kind == kind]
-                self.assertEqual(len(selected), 2, (weight_class, kind))
+                group = [item for item in examples if VEHICLES[item.slot].weight_class == weight_class
+                         and VEHICLES[item.slot].kind == kind]
+                self.assertEqual(sum(item.name in faster for item in group), 2, (weight_class, kind))
+                self.assertEqual(sum(item.name in weaker for item in group),
+                                 3 if kind == "Kart" else 2, (weight_class, kind))
         by_name = {item.name: item for item in examples}
         self.assertEqual(by_name["Vortex"].stats["drift_target_angle"], 90.0)
         self.assertEqual(by_name["Jelly"].stats["accel_a1"], 1.75)
         self.assertEqual(by_name["Poo"].stats["bump_deviation"], 40.0)
+        self.assertLess(by_name["Mudtrap"].stats["speed_multiplier_3"], 0.1)
+        self.assertEqual(by_name["Spinout"].stats["manual_drift"], 0.5)
 
     def test_garage_conversion_is_consumable_as_bundled_collection(self):
         with tempfile.TemporaryDirectory() as tmp:
