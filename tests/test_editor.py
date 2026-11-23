@@ -6,7 +6,8 @@ from tkinter import ttk
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from vehiclegarage.app import GarageApp
+from tests import destroy_tk_app
+from vehiclegarage.app import GarageApp, ToolTip
 from vehiclegarage.creations import Creation
 from vehiclegarage.kartparam import KartParam, SECTION_SIZE
 from vehiclegarage.stats import ADVANCED_FIELDS, advanced_slider_range, format_value
@@ -75,9 +76,7 @@ class VehicleSelectionLayoutTests(unittest.TestCase):
                 self.assertEqual(saved.cget("anchor"), "nw")
                 self.assertEqual(empty.cget("anchor"), "nw")
             finally:
-                for timer in app.tk.splitlist(app.tk.call("after", "info")):
-                    app.after_cancel(timer)
-                app.destroy()
+                destroy_tk_app(app)
 
 
 class GarageColumnLayoutTests(unittest.TestCase):
@@ -115,12 +114,21 @@ class GarageColumnLayoutTests(unittest.TestCase):
                 app.update()
                 self.assertEqual(scrollbar.get()[1], 1)
             finally:
-                for timer in app.tk.splitlist(app.tk.call("after", "info")):
-                    app.after_cancel(timer)
-                app.destroy()
+                destroy_tk_app(app)
 
 
 class EditorAdvancedLayoutTests(unittest.TestCase):
+    def test_cleanup_keeps_widget_timer_ownership(self):
+        try:
+            root = tk.Tk()
+        except tk.TclError as err:
+            self.skipTest(f"Tk display unavailable: {err}")
+        label = ttk.Label(root)
+        tooltip = ToolTip(label, lambda: "Tip")
+        tooltip._schedule(None)
+        root.after(60000, lambda: None)
+        destroy_tk_app(root)
+
     def test_advanced_toggle_visible_and_fields_scroll_into_view(self):
         try:
             probe = tk.Tk()
@@ -167,9 +175,7 @@ class EditorAdvancedLayoutTests(unittest.TestCase):
                     app.update()
                     self.assertFalse(app.advanced_frame.winfo_ismapped())
             finally:
-                for timer in app.tk.splitlist(app.tk.call("after", "info")):
-                    app.after_cancel(timer)
-                app.destroy()
+                destroy_tk_app(app)
 
     def test_sliders_preserve_exact_values_and_sync_entries(self):
         try:
@@ -198,6 +204,9 @@ class EditorAdvancedLayoutTests(unittest.TestCase):
                 tooltip = app._advanced_tooltip("max_normal_acceleration", "Cap on acceleration")
                 self.assertIn("Slider range: 1 to 12", tooltip)
                 self.assertIn("Stock vehicles:", tooltip)
+                app.advanced_open.set(True)
+                app._toggle_advanced()
+                app.update()
                 for field, _, _ in ADVANCED_FIELDS:
                     high = app._advanced_ranges[field][1]
                     app.advanced_sliders[field].set(high)
@@ -232,9 +241,7 @@ class EditorAdvancedLayoutTests(unittest.TestCase):
                 self.assertEqual(app._collect_stats(0), {})
                 self.assertEqual(app.advanced_vars["tilt"].get(), format_value(stock.vehicles[0].get("tilt")))
             finally:
-                for timer in app.tk.splitlist(app.tk.call("after", "info")):
-                    app.after_cancel(timer)
-                app.destroy()
+                destroy_tk_app(app)
 
     def test_stock_ranges_and_identical_values(self):
         self.assertEqual(advanced_slider_range("tilt", [-2.0, 3.0]), (-2.0, 3.0))

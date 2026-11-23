@@ -8,6 +8,7 @@ from queue import Queue
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from tests import destroy_tk_app
 from vehiclegarage import cli, garages, presets
 from vehiclegarage.app import GarageApp
 from vehiclegarage.creations import Creation, Library
@@ -260,9 +261,7 @@ class GarageUiTests(unittest.TestCase):
                     self.assertLessEqual(button.winfo_rootx() + button.winfo_width(),
                                          window.winfo_rootx() + window.winfo_width())
             finally:
-                for timer in app.tk.splitlist(app.tk.call("after", "info")):
-                    app.after_cancel(timer)
-                app.destroy()
+                destroy_tk_app(app)
 
 
 if __name__ == "__main__":

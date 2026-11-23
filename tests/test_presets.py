@@ -7,6 +7,7 @@ from queue import Queue
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from tests import destroy_tk_app
 from tests.test_archives import build_u8
 from tests.test_bmg import build_bmg
 from tests.test_export import fake_szs, stock_kartparam
@@ -336,9 +337,7 @@ class PresetUiTests(unittest.TestCase):
                             self.assertEqual(presets.read(destination)[0].name, "Garage Edit")
                             self.assertEqual(presets.read(root / presets.DRAFT_FILE)[0].name, "Old Draft")
                     finally:
-                        for timer in app.tk.splitlist(app.tk.call("after", "info")):
-                            app.after_cancel(timer)
-                        app.destroy()
+                        destroy_tk_app(app)
 
 if __name__ == "__main__":
     unittest.main()
